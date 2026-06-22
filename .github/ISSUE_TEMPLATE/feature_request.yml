@@ -1,0 +1,41 @@
+name: Feature request
+description: Propose an improvement to the review workflow
+title: "feature: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Review problem
+      description: What review task is difficult today, and who encounters it?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the interaction and expected result. Key bindings are optional.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Note current workarounds or other designs you considered.
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Add sketches, examples, or links to related roadmap tasks.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues and roadmap tasks for this request.
+          required: true

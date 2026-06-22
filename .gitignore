@@ -1,0 +1,18 @@
+# Build and test output
+/cride
+/dist/
+*.out
+*.test
+coverage.txt
+
+# cride's own review state when developing this repository
+/.cride/
+/.crreview
+/review.md
+
+# Local operating-system metadata
+.DS_Store
+
+.codex/
+.agents/
+.claude/
