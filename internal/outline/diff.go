@@ -37,11 +37,13 @@ func (t ChangeType) String() string {
 
 // SymbolChange is one before/current declaration pairing.
 type SymbolChange struct {
-	Type           ChangeType
-	Path           string
-	Before         *lsp.DocumentSymbol
-	After          *lsp.DocumentSymbol
-	BodySimilarity float64
+	Type             ChangeType
+	Path             string
+	Before           *lsp.DocumentSymbol
+	After            *lsp.DocumentSymbol
+	ContainsAddition bool
+	ContainsDeletion bool
+	BodySimilarity   float64
 }
 
 type qualifiedSymbol struct {
@@ -51,7 +53,7 @@ type qualifiedSymbol struct {
 
 // DiffOutlines matches declarations by qualified name and marks same-name
 // symbols modified when their ranges intersect review lines.
-func DiffOutlines(before, after []lsp.DocumentSymbol, beforeContent, afterContent []byte, oldPath, newPath string, idx diff.ReviewIndex) []SymbolChange {
+func DiffOutlines(before, after []lsp.DocumentSymbol, beforeContent, afterContent []byte, oldPath, newPath string, files []diff.FileDiff) []SymbolChange {
 	beforeFlat := flattenQualified(before)
 	afterFlat := flattenQualified(after)
 	displayPath := newPath
@@ -80,11 +82,20 @@ func DiffOutlines(before, after []lsp.DocumentSymbol, beforeContent, afterConten
 		}
 		matchedBefore[bi], matchedAfter[ai] = true, true
 		b, a := item.symbol, afterFlat[ai].symbol
+		containsAddition := rangeHasKind(files, newPath, a.Range, diff.ChangeAdded)
+		containsDeletion := rangeHasKind(files, oldPath, b.Range, diff.ChangeDeleted)
 		changeType := SymbolUnchanged
-		if rangeHasKind(idx, oldPath, b.Range, diff.ChangeDeleted) || rangeHasKind(idx, newPath, a.Range, diff.ChangeAdded) {
+		if containsAddition || containsDeletion {
 			changeType = SymbolModified
 		}
-		changes = append(changes, SymbolChange{Type: changeType, Path: displayPath, Before: &b, After: &a})
+		changes = append(changes, SymbolChange{
+			Type:             changeType,
+			Path:             displayPath,
+			Before:           &b,
+			After:            &a,
+			ContainsAddition: containsAddition,
+			ContainsDeletion: containsDeletion,
+		})
 	}
 
 	type renamePair struct {
@@ -113,18 +124,36 @@ func DiffOutlines(before, after []lsp.DocumentSymbol, beforeContent, afterConten
 		}
 		matchedBefore[pair.bi], matchedAfter[pair.ai] = true, true
 		b, a := beforeFlat[pair.bi].symbol, afterFlat[pair.ai].symbol
-		changes = append(changes, SymbolChange{Type: SymbolRenamed, Path: displayPath, Before: &b, After: &a, BodySimilarity: pair.similarity})
+		changes = append(changes, SymbolChange{
+			Type:             SymbolRenamed,
+			Path:             displayPath,
+			Before:           &b,
+			After:            &a,
+			ContainsAddition: rangeHasKind(files, newPath, a.Range, diff.ChangeAdded),
+			ContainsDeletion: rangeHasKind(files, oldPath, b.Range, diff.ChangeDeleted),
+			BodySimilarity:   pair.similarity,
+		})
 	}
 	for i, item := range beforeFlat {
 		if !matchedBefore[i] {
 			b := item.symbol
-			changes = append(changes, SymbolChange{Type: SymbolRemoved, Path: displayPath, Before: &b})
+			changes = append(changes, SymbolChange{
+				Type:             SymbolRemoved,
+				Path:             displayPath,
+				Before:           &b,
+				ContainsDeletion: rangeHasKind(files, oldPath, b.Range, diff.ChangeDeleted),
+			})
 		}
 	}
 	for i, item := range afterFlat {
 		if !matchedAfter[i] {
 			a := item.symbol
-			changes = append(changes, SymbolChange{Type: SymbolAdded, Path: displayPath, After: &a})
+			changes = append(changes, SymbolChange{
+				Type:             SymbolAdded,
+				Path:             displayPath,
+				After:            &a,
+				ContainsAddition: rangeHasKind(files, newPath, a.Range, diff.ChangeAdded),
+			})
 		}
 	}
 
@@ -154,8 +183,8 @@ func flattenQualified(symbols []lsp.DocumentSymbol) []qualifiedSymbol {
 	return out
 }
 
-func rangeHasKind(idx diff.ReviewIndex, path string, r source.Range, kind diff.ChangeKind) bool {
-	if idx == nil || path == "" || path == "/dev/null" {
+func rangeHasKind(files []diff.FileDiff, path string, r source.Range, kind diff.ChangeKind) bool {
+	if path == "" || path == "/dev/null" {
 		return false
 	}
 	start, end := r.Start.Line, r.End.Line
@@ -165,9 +194,30 @@ func rangeHasKind(idx diff.ReviewIndex, path string, r source.Range, kind diff.C
 	if end < start {
 		end = start
 	}
-	for line := start; line <= end; line++ {
-		if idx.LineChangeKind(path, line) == kind {
-			return true
+	for _, file := range files {
+		if kind == diff.ChangeAdded && file.NewPath != path {
+			continue
+		}
+		if kind == diff.ChangeDeleted && file.OldPath != path {
+			continue
+		}
+		for _, hunk := range file.Hunks {
+			for _, line := range hunk.Lines {
+				lineNumber := 0
+				switch kind {
+				case diff.ChangeAdded:
+					if line.Kind == diff.LineAdd {
+						lineNumber = line.NewLine
+					}
+				case diff.ChangeDeleted:
+					if line.Kind == diff.LineDelete {
+						lineNumber = line.OldLine
+					}
+				}
+				if lineNumber >= start && lineNumber <= end {
+					return true
+				}
+			}
 		}
 	}
 	return false

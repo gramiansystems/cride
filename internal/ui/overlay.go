@@ -24,9 +24,10 @@ type Overlay struct {
 }
 
 type OverlayResult struct {
-	Label   string
-	Preview string
-	Tone    ResultTone
+	Label       string
+	Preview     string
+	Tone        ResultTone
+	ChangeField bool
 }
 
 func RenderOverlay(base string, overlay Overlay, width, height int) string {
@@ -129,7 +130,7 @@ func overlayResultLine(result OverlayResult, width int) string {
 }
 
 func overlayResultLineWithLabelWidth(result OverlayResult, width, labelWidth int) string {
-	return resultLine(result.Label, result.Preview, width, result.Tone, labelWidth)
+	return resultLine(result.Label, result.Preview, width, result.Tone, labelWidth, result.ChangeField)
 }
 
 // OverlayResultIndexAt maps a screen click to an overlay result index,

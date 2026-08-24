@@ -724,7 +724,7 @@ func hoverCmd(client lsp.Client, generation int, query navsearch.SymbolQuery, wi
 	}
 }
 
-func documentSymbolsCmd(client lsp.Client, extractor outline.Extractor, src diffsource.Source, generation int, path string) tea.Cmd {
+func documentSymbolsCmd(client lsp.Client, extractor outline.Extractor, src diffsource.Source, generation int, path string, reviewFiles ...diff.FileDiff) tea.Cmd {
 	if client == nil {
 		client = lsp.NewUnavailableClient(lsp.Config{})
 	}
@@ -746,6 +746,8 @@ func documentSymbolsCmd(client lsp.Client, extractor outline.Extractor, src diff
 				err = contentErr
 			}
 		}
+		setSymbolPath(symbols, path)
+		changes := documentOutlineChanges(src, extractor, path, symbols, reviewFiles)
 		flat := lsp.FlattenDocumentSymbols(symbols)
 		results := make([]enrichmentResult, 0, len(flat))
 		for _, symbol := range flat {
@@ -757,6 +759,7 @@ func documentSymbolsCmd(client lsp.Client, extractor outline.Extractor, src diff
 				Location: loc,
 				Label:    lsp.DocumentSymbolLabel(symbol),
 				Preview:  symbol.Detail,
+				Review:   symbolRangeReview(symbol, changes),
 			})
 		}
 		return enrichmentLoadedMsg{
@@ -768,6 +771,66 @@ func documentSymbolsCmd(client lsp.Client, extractor outline.Extractor, src diff
 			err:        err,
 		}
 	}
+}
+
+func documentOutlineChanges(src diffsource.Source, extractor outline.Extractor, path string, symbols []lsp.DocumentSymbol, files []diff.FileDiff) []outline.SymbolChange {
+	if src == nil || len(files) == 0 {
+		return nil
+	}
+	var reviewFile *diff.FileDiff
+	for i := range files {
+		_, newPath := reviewSidePaths(files[i])
+		if newPath == path {
+			reviewFile = &files[i]
+			break
+		}
+	}
+	if reviewFile == nil {
+		return nil
+	}
+	oldPath, newPath := reviewSidePaths(*reviewFile)
+	var beforeContent, afterContent []byte
+	var before []lsp.DocumentSymbol
+	if oldPath != "" {
+		beforeContent, _ = src.BaselineContent(oldPath)
+		if len(beforeContent) > 0 {
+			before, _ = extractor.Symbols(oldPath, beforeContent)
+			setSymbolPath(before, oldPath)
+		}
+	}
+	if newPath != "" {
+		afterContent, _ = src.CurrentContent(newPath)
+	}
+	return outline.DiffOutlines(before, symbols, beforeContent, afterContent, oldPath, newPath, []diff.FileDiff{*reviewFile})
+}
+
+func symbolRangeReview(symbol lsp.DocumentSymbol, changes []outline.SymbolChange) diff.ReviewMarkers {
+	for _, change := range changes {
+		if change.After == nil || !sameDocumentSymbol(*change.After, symbol) {
+			continue
+		}
+		return diff.ReviewMarkers{
+			ContainsAddition: change.ContainsAddition,
+			ContainsDeletion: change.ContainsDeletion,
+			EntireAddition:   change.Type == outline.SymbolAdded && change.ContainsAddition,
+			EntireDeletion:   change.Type == outline.SymbolRemoved && change.ContainsDeletion,
+		}
+	}
+	return diff.ReviewMarkers{}
+}
+
+func sameDocumentSymbol(a, b lsp.DocumentSymbol) bool {
+	if a.Name != b.Name || a.Kind != b.Kind {
+		return false
+	}
+	aLoc, bLoc := a.SelectionRange.Start, b.SelectionRange.Start
+	if aLoc.Line < 1 {
+		aLoc = a.Range.Start
+	}
+	if bLoc.Line < 1 {
+		bLoc = b.Range.Start
+	}
+	return aLoc.Path == bLoc.Path && aLoc.Line == bLoc.Line && aLoc.Column == bLoc.Column
 }
 
 func workspaceSymbolsCmd(client lsp.Client, generation int, query string) tea.Cmd {
@@ -1133,6 +1196,13 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.enrichmentPanel.Open && m.enrichmentPanel.Kind == enrichmentPanelOutlineDiff {
 			m.refreshOutlinePanel()
+		}
+		if m.overlay.Kind == OverlayWorkspaceSymbol {
+			for i := range m.overlay.RawResults {
+				m.overlay.RawResults[i].Review = m.reviewWithOutlineChange(m.overlay.RawResults[i].Location, "", 0, m.overlay.RawResults[i].Review)
+			}
+			m.overlay.Results = m.rankOverlayResults(m.overlay.RawResults)
+			m.clampOverlayCursor()
 		}
 		m.clampScroll()
 		return m, nil
@@ -2037,7 +2107,7 @@ func (m *Model) openDocumentSymbolsPanel() tea.Cmd {
 		return nil
 	}
 	m.clampScroll()
-	return documentSymbolsCmd(m.lsp, m.outlineExtractor, m.source, m.enrichmentPanel.Generation, path)
+	return documentSymbolsCmd(m.lsp, m.outlineExtractor, m.source, m.enrichmentPanel.Generation, path, m.files...)
 }
 
 func (m *Model) openCallHierarchyPanel(kind enrichmentPanelKind) tea.Cmd {
@@ -2379,7 +2449,13 @@ func (m Model) rankEnrichmentResults(results []enrichmentResult) []enrichmentRes
 	current := m.currentReviewLocation()
 	for i, result := range results {
 		result.Score = max(result.Score, max(0, 1000-i))
+		containsAddition, containsDeletion := result.Review.ContainsAddition, result.Review.ContainsDeletion
+		entireAddition, entireDeletion := result.Review.EntireAddition, result.Review.EntireDeletion
 		result.Review = diff.MarkersForIndex(review, result.Location.Path, result.Location.Line)
+		result.Review.ContainsAddition = containsAddition
+		result.Review.ContainsDeletion = containsDeletion
+		result.Review.EntireAddition = entireAddition
+		result.Review.EntireDeletion = entireDeletion
 		result.Review = m.reviewMarkersForResultSide(result.Location, result.Side, result.Review)
 		result.Score += navigationReviewScore(result.Location, current, result.Review, review, false)
 		ranked = append(ranked, result)
@@ -2660,9 +2736,10 @@ func (m Model) overlayView() ui.Overlay {
 	}
 	for _, result := range m.overlay.Results {
 		overlay.Results = append(overlay.Results, ui.OverlayResult{
-			Label:   m.overlayResultLabel(result),
-			Preview: result.Preview,
-			Tone:    m.resultTone(result.Kind, result.Location, result.Side, result.Review),
+			Label:       m.overlayResultLabel(result),
+			Preview:     result.Preview,
+			Tone:        m.resultTone(result.Kind, result.Location, result.Side, result.Review),
+			ChangeField: m.overlay.Kind == OverlayWorkspaceSymbol,
 		})
 	}
 	return overlay
@@ -2763,9 +2840,10 @@ func (m Model) enrichmentPanelViewValue() ui.BottomPanel {
 	}
 	for _, result := range m.enrichmentPanel.Results {
 		panel.Results = append(panel.Results, ui.BottomPanelResult{
-			Label:   m.enrichmentResultLabel(result),
-			Preview: result.Preview,
-			Tone:    resultToneForChangeKind(result.Review.ChangeKind),
+			Label:       m.enrichmentResultLabel(result),
+			Preview:     result.Preview,
+			Tone:        m.resultTone(navsearch.ResultText, result.Location, result.Side, result.Review),
+			ChangeField: m.enrichmentPanel.Kind == enrichmentPanelDocumentSymbols || m.enrichmentPanel.Kind == enrichmentPanelOutlineDiff,
 		})
 	}
 	return panel
@@ -2923,7 +3001,7 @@ func (m Model) diagnosticLabel(diagnostic lsp.Diagnostic) string {
 func (m Model) overlayResultLabel(result navsearch.Result) string {
 	label := result.Label
 	reviewMarkers := m.reviewMarkersForResultSide(result.Location, result.Side, result.Review)
-	markers := m.reviewMarkerLabels(result.Location, reviewMarkers)
+	markers := m.reviewMarkerLabelsWithChangeText(result.Location, reviewMarkers, m.overlay.Kind != OverlayWorkspaceSymbol)
 	if len(markers) > 0 {
 		label = "[" + strings.Join(markers, ",") + "] " + label
 	}
@@ -2932,7 +3010,8 @@ func (m Model) overlayResultLabel(result navsearch.Result) string {
 
 func (m Model) enrichmentResultLabel(result enrichmentResult) string {
 	label := result.Label
-	markers := m.reviewMarkerLabels(result.Location, m.reviewMarkersForResultSide(result.Location, result.Side, result.Review))
+	showChangeText := m.enrichmentPanel.Kind != enrichmentPanelDocumentSymbols && m.enrichmentPanel.Kind != enrichmentPanelOutlineDiff
+	markers := m.reviewMarkerLabelsWithChangeText(result.Location, m.reviewMarkersForResultSide(result.Location, result.Side, result.Review), showChangeText)
 	if len(markers) > 0 {
 		prefix := "[" + strings.Join(markers, ",") + "] "
 		if !strings.HasPrefix(label, prefix) {
@@ -2943,15 +3022,21 @@ func (m Model) enrichmentResultLabel(result enrichmentResult) string {
 }
 
 func (m Model) reviewMarkerLabels(loc source.Location, markers diff.ReviewMarkers) []string {
+	return m.reviewMarkerLabelsWithChangeText(loc, markers, true)
+}
+
+func (m Model) reviewMarkerLabelsWithChangeText(loc source.Location, markers diff.ReviewMarkers, showChangeText bool) []string {
 	var out []string
-	switch {
-	case markers.ChangeKind == diff.ChangeAdded || markers.ChangeKind == diff.ChangeDeleted:
-	case markers.Changed:
-		out = append(out, "changed-line")
-	case markers.ChangeKind == diff.ChangeContext:
-		out = append(out, "context")
-	case m.reviewIndex().IsChanged(loc.Path):
-		out = append(out, "changed-file")
+	if showChangeText && !markers.ContainsAddition && !markers.ContainsDeletion {
+		switch {
+		case markers.ChangeKind == diff.ChangeAdded || markers.ChangeKind == diff.ChangeDeleted:
+		case markers.Changed:
+			out = append(out, "changed-line")
+		case markers.ChangeKind == diff.ChangeContext:
+			out = append(out, "context")
+		case m.reviewIndex().IsChanged(loc.Path):
+			out = append(out, "changed-file")
+		}
 	}
 	if markers.Unread {
 		out = append(out, "unread")
@@ -2965,6 +3050,18 @@ func (m Model) reviewMarkerLabels(loc source.Location, markers diff.ReviewMarker
 func (m Model) resultTone(kind navsearch.ResultKind, loc source.Location, side navsearch.ResultSide, markers diff.ReviewMarkers) ui.ResultTone {
 	if kind != navsearch.ResultText {
 		return ui.ResultToneNone
+	}
+	switch {
+	case markers.EntireAddition:
+		return ui.ResultToneAddedEntire
+	case markers.EntireDeletion:
+		return ui.ResultToneDeletedEntire
+	case markers.ContainsAddition && markers.ContainsDeletion:
+		return ui.ResultToneModified
+	case markers.ContainsAddition:
+		return ui.ResultToneAdded
+	case markers.ContainsDeletion:
+		return ui.ResultToneDeleted
 	}
 	switch side {
 	case navsearch.ResultSideBaseline:
@@ -3088,16 +3185,52 @@ func changeKindPriority(kind diff.ChangeKind) int {
 func (m Model) workspaceSymbolOverlayRawResults(results []lsp.WorkspaceSymbol) []navsearch.Result {
 	out := make([]navsearch.Result, 0, len(results))
 	for _, symbol := range results {
+		review := m.reviewWithOutlineChange(symbol.Location, symbol.Name, symbol.Kind, symbol.Review)
 		out = append(out, navsearch.Result{
 			Kind:     navsearch.ResultText,
 			Location: symbol.Location,
 			Label:    lsp.WorkspaceSymbolLabel(symbol),
 			Preview:  symbol.ContainerName,
 			Score:    symbol.Score,
-			Review:   symbol.Review,
+			Review:   review,
 		})
 	}
 	return out
+}
+
+func (m Model) reviewWithOutlineChange(loc source.Location, name string, kind lsp.SymbolKind, review diff.ReviewMarkers) diff.ReviewMarkers {
+	for _, change := range m.outlineChanges {
+		if change.After == nil {
+			continue
+		}
+		afterLoc := change.After.SelectionRange.Start
+		if afterLoc.Line < 1 {
+			afterLoc = change.After.Range.Start
+		}
+		if !symbolLocationMatches(loc, *change.After, afterLoc) || (name != "" && change.After.Name != name) || (kind != 0 && change.After.Kind != kind) {
+			continue
+		}
+		review.ContainsAddition = change.ContainsAddition
+		review.ContainsDeletion = change.ContainsDeletion
+		review.EntireAddition = change.Type == outline.SymbolAdded && change.ContainsAddition
+		review.EntireDeletion = change.Type == outline.SymbolRemoved && change.ContainsDeletion
+		break
+	}
+	return review
+}
+
+func symbolLocationMatches(loc source.Location, symbol lsp.DocumentSymbol, selection source.Location) bool {
+	if loc == selection || loc == symbol.Range.Start {
+		return true
+	}
+	start, end := symbol.Range.Start, symbol.Range.End
+	if loc.Path == "" || loc.Path != start.Path || loc.Line < start.Line || loc.Line > end.Line {
+		return false
+	}
+	if loc.Line == start.Line && start.Column > 0 && loc.Column < start.Column {
+		return false
+	}
+	return loc.Line != end.Line || end.Column < 1 || loc.Column <= end.Column
 }
 
 func (m *Model) recordLSPStatus(status lsp.Status) {
@@ -3953,7 +4086,7 @@ func navigationReviewScore(loc, current source.Location, markers diff.ReviewMark
 			score += max(0, 1000-delta)
 		}
 	}
-	if markers.Changed {
+	if markers.Changed || markers.ContainsAddition || markers.ContainsDeletion {
 		score += 8000
 		if markers.Unread {
 			score += 1500

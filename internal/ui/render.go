@@ -100,9 +100,10 @@ const (
 )
 
 type BottomPanelResult struct {
-	Label   string
-	Preview string
-	Tone    ResultTone
+	Label       string
+	Preview     string
+	Tone        ResultTone
+	ChangeField bool
 }
 
 type ResultTone int
@@ -111,6 +112,9 @@ const (
 	ResultToneNone ResultTone = iota
 	ResultToneAdded
 	ResultToneDeleted
+	ResultToneAddedEntire
+	ResultToneDeletedEntire
+	ResultToneModified
 )
 
 type RenderOptions struct {
@@ -465,7 +469,7 @@ func bottomPanelStatus(panel BottomPanel) string {
 }
 
 func bottomPanelResultLine(result BottomPanelResult, width int) string {
-	return resultLine(result.Label, result.Preview, width, result.Tone, 0)
+	return resultLine(result.Label, result.Preview, width, result.Tone, 0, result.ChangeField)
 }
 
 func diffPanelLines(files []diff.FileDiff, rows []Row, selectedFile, cursor, top, topWrap, width, height int, hl *highlight.Highlighter, fullFile bool, matches []MatchSpan, live bool, breadcrumb string, showBreadcrumb bool) []string {
@@ -1035,18 +1039,37 @@ func padRight(s string, w int) string {
 	return s + strings.Repeat(" ", w-vis)
 }
 
-func resultLine(label, preview string, width int, tone ResultTone, labelWidth int) string {
+func resultLine(label, preview string, width int, tone ResultTone, labelWidth int, changeField bool) string {
 	out := styleLeadingResultMarkers(label)
 	if labelWidth > 0 {
 		out = padRight(out, labelWidth)
 	}
-	if sign := resultToneSign(tone); sign != "" {
+	if changeField {
+		out = resultToneChangeField(tone) + " " + out
+	} else if sign := resultToneSign(tone); sign != "" {
 		out = sign + " " + out
 	}
 	if preview != "" {
 		out += dimStyle.Render("  " + strings.TrimSpace(preview))
 	}
 	return truncate.String(out, uint(max(1, width)))
+}
+
+func resultToneChangeField(tone ResultTone) string {
+	switch tone {
+	case ResultToneAdded:
+		return afterBadgeStyle.Render("+") + "  "
+	case ResultToneDeleted:
+		return beforeBadgeStyle.Render("-") + "  "
+	case ResultToneAddedEntire:
+		return afterBadgeStyle.Render("+++")
+	case ResultToneDeletedEntire:
+		return beforeBadgeStyle.Render("---")
+	case ResultToneModified:
+		return afterBadgeStyle.Render("+") + dimStyle.Render(",") + beforeBadgeStyle.Render("-")
+	default:
+		return "   "
+	}
 }
 
 func renderResultRow(line string, width int, selected bool, tone ResultTone) string {
@@ -1064,9 +1087,9 @@ func renderResultRow(line string, width int, selected bool, tone ResultTone) str
 
 func resultToneStyle(tone ResultTone) lipgloss.Style {
 	switch tone {
-	case ResultToneAdded:
+	case ResultToneAdded, ResultToneAddedEntire:
 		return addedBgStyle
-	case ResultToneDeleted:
+	case ResultToneDeleted, ResultToneDeletedEntire:
 		return removedBgStyle
 	default:
 		return lipgloss.NewStyle()
@@ -1075,9 +1098,9 @@ func resultToneStyle(tone ResultTone) lipgloss.Style {
 
 func resultToneBg(tone ResultTone) (lipgloss.Color, bool) {
 	switch tone {
-	case ResultToneAdded:
+	case ResultToneAdded, ResultToneAddedEntire:
 		return colorAddBg, true
-	case ResultToneDeleted:
+	case ResultToneDeleted, ResultToneDeletedEntire:
 		return colorDelBg, true
 	default:
 		return "", false
@@ -1090,6 +1113,12 @@ func resultToneSign(tone ResultTone) string {
 		return afterBadgeStyle.Render("+")
 	case ResultToneDeleted:
 		return beforeBadgeStyle.Render("-")
+	case ResultToneAddedEntire:
+		return afterBadgeStyle.Render("+++")
+	case ResultToneDeletedEntire:
+		return beforeBadgeStyle.Render("---")
+	case ResultToneModified:
+		return afterBadgeStyle.Render("+") + dimStyle.Render(",") + beforeBadgeStyle.Render("-")
 	default:
 		return ""
 	}

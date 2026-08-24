@@ -53,7 +53,6 @@ func outlineDiffCmd(src diffsource.Source, client lsp.Client, extractor outline.
 			current:    make(map[string][]lsp.DocumentSymbol),
 			baseline:   make(map[string][]lsp.DocumentSymbol),
 		}
-		idx := diff.NewReviewIndex(files)
 		for _, file := range files {
 			if file.Binary {
 				continue
@@ -86,7 +85,7 @@ func outlineDiffCmd(src diffsource.Source, client lsp.Client, extractor outline.
 				setSymbolPath(after, newPath)
 				msg.current[newPath] = after
 			}
-			msg.changes = append(msg.changes, outline.DiffOutlines(before, after, beforeContent, afterContent, oldPath, newPath, idx)...)
+			msg.changes = append(msg.changes, outline.DiffOutlines(before, after, beforeContent, afterContent, oldPath, newPath, []diff.FileDiff{file})...)
 		}
 		return msg
 	}
@@ -169,7 +168,12 @@ func (m *Model) refreshOutlinePanel() {
 
 func outlineEnrichmentResult(change outline.SymbolChange) enrichmentResult {
 	var symbol lsp.DocumentSymbol
-	result := enrichmentResult{}
+	result := enrichmentResult{Review: diff.ReviewMarkers{
+		ContainsAddition: change.ContainsAddition,
+		ContainsDeletion: change.ContainsDeletion,
+		EntireAddition:   change.Type == outline.SymbolAdded && change.ContainsAddition,
+		EntireDeletion:   change.Type == outline.SymbolRemoved && change.ContainsDeletion,
+	}}
 	if change.After != nil {
 		symbol = *change.After
 		result.Location = symbol.SelectionRange.Start
@@ -190,7 +194,7 @@ func outlineEnrichmentResult(change outline.SymbolChange) enrichmentResult {
 		name = change.Before.Name + " → " + change.After.Name
 	}
 	line := max(1, result.Location.Line)
-	result.Label = "[" + symbol.Kind.String() + "] " + name + "  " + change.Type.String() + " · " + change.Path + ":" + strconv.Itoa(line)
+	result.Label = "[" + symbol.Kind.String() + "] " + name + "  " + change.Path + ":" + strconv.Itoa(line)
 	if symbol.Detail != "" {
 		result.Preview = symbol.Detail
 	}

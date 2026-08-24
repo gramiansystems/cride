@@ -75,11 +75,15 @@ func (s AnnotationStatus) Open() bool {
 // ReviewMarkers are attached to navigation results so renderers and rankers can
 // explain why a location matters in review context.
 type ReviewMarkers struct {
-	Changed    bool
-	ChangeKind ChangeKind
-	Unread     bool
-	Annotated  bool
-	Annotation AnnotationStatus
+	Changed          bool
+	ChangeKind       ChangeKind
+	ContainsAddition bool
+	ContainsDeletion bool
+	EntireAddition   bool
+	EntireDeletion   bool
+	Unread           bool
+	Annotated        bool
+	Annotation       AnnotationStatus
 }
 
 // ReviewIndex is a query layer over review state. It is intentionally read-only

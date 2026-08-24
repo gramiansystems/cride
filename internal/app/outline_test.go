@@ -8,6 +8,7 @@ import (
 	"cride/internal/diff"
 	"cride/internal/lsp"
 	"cride/internal/outline"
+	"cride/internal/source"
 	"cride/internal/ui"
 )
 
@@ -39,6 +40,65 @@ func TestDocumentSymbolsFallsBackToLexicalExtraction(t *testing.T) {
 	}
 	if !strings.Contains(got.enrichmentPanel.Results[0].Label, "Target") {
 		t.Fatalf("first result = %q", got.enrichmentPanel.Results[0].Label)
+	}
+}
+
+func TestDocumentSymbolsDistinguishContainedChangesFromChangedFile(t *testing.T) {
+	t.Parallel()
+	current := "package p\nfunc Changed() {\n\tkeep()\n\tadded()\n}\nfunc Untouched() {\n\tkeep()\n}\n"
+	baseline := "package p\nfunc Changed() {\n\tremoved()\n\tkeep()\n}\nfunc Untouched() {\n\tkeep()\n}\n"
+	file := diff.FileDiff{
+		OldPath: "a.go", NewPath: "a.go", Status: diff.FileModified,
+		Hunks: []diff.Hunk{{Lines: []diff.Line{
+			{Kind: diff.LineDelete, Content: "\tremoved()", OldLine: 3},
+			{Kind: diff.LineContext, Content: "\tkeep()", OldLine: 4, NewLine: 3},
+			{Kind: diff.LineAdd, Content: "\tadded()", NewLine: 4},
+		}}},
+	}
+	m := Model{
+		source: fakeSource{
+			contents:         map[string][]byte{"a.go": []byte(current)},
+			baselineContents: map[string][]byte{"a.go": []byte(baseline)},
+		},
+		lsp: fakeLSP{documentSymbols: []lsp.DocumentSymbol{
+			{
+				Name: "Changed", Kind: lsp.SymbolFunction,
+				Range:          source.Range{Start: source.Location{Path: "a.go", Line: 2, Column: 1}, End: source.Location{Path: "a.go", Line: 5, Column: 2}},
+				SelectionRange: source.Range{Start: source.Location{Path: "a.go", Line: 2, Column: 6}},
+			},
+			{
+				Name: "Untouched", Kind: lsp.SymbolFunction,
+				Range:          source.Range{Start: source.Location{Path: "a.go", Line: 6, Column: 1}, End: source.Location{Path: "a.go", Line: 8, Column: 2}},
+				SelectionRange: source.Range{Start: source.Location{Path: "a.go", Line: 6, Column: 6}},
+			},
+		}},
+		outlineExtractor: outline.LexicalExtractor{},
+		files:            []diff.FileDiff{file},
+		changedPaths:     changedPathSet([]diff.FileDiff{file}),
+		selectedFile:     0,
+		width:            100,
+		height:           24,
+		fileContents:     make(map[string]fileContentState),
+	}
+
+	cmd := m.openDocumentSymbolsPanel()
+	if cmd == nil {
+		t.Fatal("document symbols returned nil command")
+	}
+	next, _ := m.Update(cmd())
+	got := next.(Model)
+	panel := got.enrichmentPanelViewValue()
+	results := map[string]ui.BottomPanelResult{}
+	for i, result := range got.enrichmentPanel.Results {
+		results[result.Label] = panel.Results[i]
+	}
+	changed := results["[function] Changed  2:6"]
+	if changed.Tone != ui.ResultToneModified || !changed.ChangeField || strings.Contains(changed.Label, "contains-") {
+		t.Fatalf("changed function result = %+v, want symbolic mixed tone", changed)
+	}
+	untouched := results["[function] Untouched  6:6"]
+	if untouched.Tone != ui.ResultToneNone || !untouched.ChangeField || strings.Contains(untouched.Label, "changed-file") {
+		t.Fatalf("untouched function result = %+v, want blank change field", untouched)
 	}
 }
 

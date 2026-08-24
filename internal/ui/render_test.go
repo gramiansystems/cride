@@ -158,12 +158,22 @@ func TestResultToneUsesGitDiffSigns(t *testing.T) {
 	lines := []string{
 		bottomPanelResultLine(BottomPanelResult{Label: "a.go:1:1", Preview: "old line", Tone: ResultToneDeleted}, 80),
 		overlayResultLine(OverlayResult{Label: "b.go:2:1", Preview: "new line", Tone: ResultToneAdded}, 80),
+		bottomPanelResultLine(BottomPanelResult{Label: "Gone", Tone: ResultToneDeletedEntire, ChangeField: true}, 80),
+		overlayResultLine(OverlayResult{Label: "New", Tone: ResultToneAddedEntire, ChangeField: true}, 80),
+		bottomPanelResultLine(BottomPanelResult{Label: "Changed", Tone: ResultToneModified, ChangeField: true}, 80),
+		bottomPanelResultLine(BottomPanelResult{Label: "Partial", Tone: ResultToneAdded, ChangeField: true}, 80),
+		overlayResultLine(OverlayResult{Label: "Untouched", ChangeField: true}, 80),
 		overlayResultLine(OverlayResult{Label: "c.go:3:1"}, 80),
 	}
 	plain := stripANSI(strings.Join(lines, "\n"))
 	for _, want := range []string{
 		"- a.go:1:1",
 		"+ b.go:2:1",
+		"--- Gone",
+		"+++ New",
+		"+,- Changed",
+		"+   Partial",
+		"    Untouched",
 		"c.go:3:1",
 	} {
 		if !strings.Contains(plain, want) {

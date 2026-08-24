@@ -272,6 +272,7 @@ func (k SymbolKind) String() string {
 type DocumentSymbol struct {
 	Name           string
 	Detail         string
+	ContainerName  string
 	Kind           SymbolKind
 	Range          source.Range
 	SelectionRange source.Range
@@ -319,6 +320,9 @@ func DocumentSymbolLabel(symbol DocumentSymbol) string {
 	if symbol.Detail != "" {
 		label += " " + symbol.Detail
 	}
+	if symbol.ContainerName != "" {
+		label += " · " + symbol.ContainerName
+	}
 	if loc.Line > 0 {
 		label += fmt.Sprintf("  %d:%d", loc.Line, max(1, loc.Column))
 	}
@@ -346,17 +350,28 @@ func CallLabel(call CallHierarchyCall) string {
 
 func FlattenDocumentSymbols(symbols []DocumentSymbol) []DocumentSymbol {
 	var out []DocumentSymbol
-	var walk func([]DocumentSymbol)
-	walk = func(items []DocumentSymbol) {
+	var walk func([]DocumentSymbol, string)
+	walk = func(items []DocumentSymbol, enclosingClass string) {
 		for _, item := range items {
 			children := item.Children
 			item.Children = nil
+			if item.ContainerName == "" && enclosingClass != "" && isFunctionSymbol(item.Kind) {
+				item.ContainerName = enclosingClass
+			}
 			out = append(out, item)
-			walk(children)
+			childClass := enclosingClass
+			if item.Kind == SymbolClass {
+				childClass = item.Name
+			}
+			walk(children, childClass)
 		}
 	}
-	walk(symbols)
+	walk(symbols, "")
 	return out
+}
+
+func isFunctionSymbol(kind SymbolKind) bool {
+	return kind == SymbolFunction || kind == SymbolMethod || kind == SymbolConstructor
 }
 
 func max(a, b int) int {

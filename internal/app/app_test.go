@@ -10,6 +10,7 @@ import (
 
 	"cride/internal/diff"
 	"cride/internal/lsp"
+	"cride/internal/outline"
 	navsearch "cride/internal/search"
 	"cride/internal/source"
 	"cride/internal/ui"
@@ -1370,6 +1371,31 @@ func TestSearchResultRowsUseResultSideTone(t *testing.T) {
 	}
 }
 
+func TestSymbolRangeMarkersSelectCompactDiffTones(t *testing.T) {
+	t.Parallel()
+	m := Model{}
+	tests := []struct {
+		name    string
+		markers diff.ReviewMarkers
+		want    ui.ResultTone
+	}{
+		{name: "entire addition", markers: diff.ReviewMarkers{ContainsAddition: true, EntireAddition: true}, want: ui.ResultToneAddedEntire},
+		{name: "entire deletion", markers: diff.ReviewMarkers{ContainsDeletion: true, EntireDeletion: true}, want: ui.ResultToneDeletedEntire},
+		{name: "mixed", markers: diff.ReviewMarkers{ContainsAddition: true, ContainsDeletion: true}, want: ui.ResultToneModified},
+		{name: "partial addition", markers: diff.ReviewMarkers{ContainsAddition: true}, want: ui.ResultToneAdded},
+		{name: "partial deletion", markers: diff.ReviewMarkers{ContainsDeletion: true}, want: ui.ResultToneDeleted},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := m.resultTone(navsearch.ResultText, source.Location{}, navsearch.ResultSideUnknown, tt.markers); got != tt.want {
+				t.Fatalf("result tone = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestImpactCommandMarksOutsideDiffReferences(t *testing.T) {
 	t.Parallel()
 
@@ -1807,6 +1833,36 @@ func TestDocumentSymbolsJumpToLine(t *testing.T) {
 	}
 }
 
+func TestDocumentSymbolsShowEnclosingClass(t *testing.T) {
+	t.Parallel()
+
+	cmd := documentSymbolsCmd(fakeLSP{
+		documentSymbols: []lsp.DocumentSymbol{{
+			Name: "Server",
+			Kind: lsp.SymbolClass,
+			Children: []lsp.DocumentSymbol{{
+				Name: "Start",
+				Kind: lsp.SymbolMethod,
+				SelectionRange: source.Range{Start: source.Location{
+					Path: "server.go", Line: 12, Column: 3,
+				}},
+			}},
+		}},
+	}, nil, nil, 1, "server.go")
+
+	raw := cmd()
+	msg, ok := raw.(enrichmentLoadedMsg)
+	if !ok {
+		t.Fatalf("document symbols message = %T, want enrichmentLoadedMsg", raw)
+	}
+	if len(msg.results) != 2 {
+		t.Fatalf("symbol results = %d, want 2", len(msg.results))
+	}
+	if got := msg.results[1].Label; got != "[method] Start · Server  12:3" {
+		t.Fatalf("method label = %q", got)
+	}
+}
+
 func TestWorkspaceSymbolsRankChangedFilesAndJump(t *testing.T) {
 	t.Parallel()
 
@@ -1854,6 +1910,53 @@ func TestWorkspaceSymbolsRankChangedFilesAndJump(t *testing.T) {
 	got = next.(Model)
 	if got.currentFilePath() != "changed.go" || got.viewMode != ViewFile {
 		t.Fatalf("jump path/mode = %q/%v, want changed.go/ViewFile", got.currentFilePath(), got.viewMode)
+	}
+}
+
+func TestWorkspaceSymbolsGainContainedChangeMarkersFromOutline(t *testing.T) {
+	t.Parallel()
+	file := testFileWithAddedLine("changed.go", 3)
+	loc := source.Location{Path: "changed.go", Line: 2, Column: 1}
+	after := lsp.DocumentSymbol{
+		Name:           "Changed",
+		Kind:           lsp.SymbolFunction,
+		Range:          source.Range{Start: loc, End: source.Location{Path: "changed.go", Line: 4, Column: 2}},
+		SelectionRange: source.Range{Start: source.Location{Path: "changed.go", Line: 2, Column: 6}},
+	}
+	m := Model{
+		files:        []diff.FileDiff{file},
+		changedPaths: changedPathSet([]diff.FileDiff{file}),
+		selectedFile: 0,
+		width:        100,
+		height:       24,
+		outlineChanges: []outline.SymbolChange{{
+			Type:             outline.SymbolModified,
+			Path:             "changed.go",
+			After:            &after,
+			ContainsAddition: true,
+		}},
+	}
+	m.openWorkspaceSymbolOverlay()
+	m.overlay.Query = "Changed"
+	next, _ := m.Update(workspaceSymbolsLoadedMsg{
+		generation: m.overlay.Generation,
+		query:      "Changed",
+		results:    []lsp.WorkspaceSymbol{{Name: "Changed", Kind: lsp.SymbolFunction, Location: loc}},
+	})
+	got := next.(Model)
+	if len(got.overlay.Results) != 1 {
+		t.Fatalf("workspace symbol results = %d, want 1", len(got.overlay.Results))
+	}
+	result := got.overlay.Results[0]
+	if label := got.overlayResultLabel(result); strings.Contains(label, "contains-") {
+		t.Fatalf("workspace symbol label kept textual range marker: %q", label)
+	}
+	if tone := got.resultTone(result.Kind, result.Location, result.Side, result.Review); tone != ui.ResultToneAdded {
+		t.Fatalf("workspace symbol tone = %v, want partial addition", tone)
+	}
+	view := got.overlayView()
+	if len(view.Results) != 1 || !view.Results[0].ChangeField {
+		t.Fatalf("workspace symbol change field = %+v", view.Results)
 	}
 }
 

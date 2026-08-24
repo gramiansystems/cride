@@ -29,7 +29,7 @@ func TestDiffOutlinesClassifiesChanges(t *testing.T) {
 			{Kind: diff.LineDelete, OldLine: 8}, {Kind: diff.LineAdd, NewLine: 8},
 		}}},
 	}}
-	changes := DiffOutlines(before, after, beforeContent, afterContent, "a.go", "b.go", diff.NewReviewIndex(files))
+	changes := DiffOutlines(before, after, beforeContent, afterContent, "a.go", "b.go", files)
 	got := map[string]ChangeType{}
 	for _, change := range changes {
 		got[changeName(change)] = change.Type
@@ -40,13 +40,29 @@ func TestDiffOutlinesClassifiesChanges(t *testing.T) {
 	if got["Same"] != SymbolModified || got["NewName"] != SymbolRenamed || got["Gone"] != SymbolRemoved || got["Added"] != SymbolAdded {
 		t.Fatalf("change types = %#v", got)
 	}
+	for _, change := range changes {
+		switch changeName(change) {
+		case "Same":
+			if !change.ContainsAddition || !change.ContainsDeletion {
+				t.Fatalf("Same range markers = %+v, want addition and deletion", change)
+			}
+		case "Gone":
+			if !change.ContainsDeletion || change.ContainsAddition {
+				t.Fatalf("Gone range markers = %+v, want deletion only", change)
+			}
+		case "Added":
+			if !change.ContainsAddition || change.ContainsDeletion {
+				t.Fatalf("Added range markers = %+v, want addition only", change)
+			}
+		}
+	}
 }
 
 func TestDiffOutlinesRejectsWeakRename(t *testing.T) {
 	t.Parallel()
 	before := []lsp.DocumentSymbol{testSymbol("a.go", "Old", lsp.SymbolFunction, 1, 2)}
 	after := []lsp.DocumentSymbol{testSymbol("a.go", "New", lsp.SymbolFunction, 1, 2)}
-	changes := DiffOutlines(before, after, []byte("func Old() {}\nold()\n"), []byte("func New() {}\nnew()\n"), "a.go", "a.go", diff.NewReviewIndex(nil))
+	changes := DiffOutlines(before, after, []byte("func Old() {}\nold()\n"), []byte("func New() {}\nnew()\n"), "a.go", "a.go", nil)
 	types := map[ChangeType]int{}
 	for _, change := range changes {
 		types[change.Type]++
@@ -62,7 +78,7 @@ func TestDiffOutlinesAcceptsRenameAtThreshold(t *testing.T) {
 	after := []lsp.DocumentSymbol{testSymbol("a.go", "New", lsp.SymbolFunction, 1, 5)}
 	beforeContent := []byte("func Old() {\nsharedOne()\nsharedTwo()\nsharedThree()\noldOnly()\n")
 	afterContent := []byte("func New() {\nsharedOne()\nsharedTwo()\nsharedThree()\nnewOnly()\n")
-	changes := DiffOutlines(before, after, beforeContent, afterContent, "a.go", "a.go", diff.NewReviewIndex(nil))
+	changes := DiffOutlines(before, after, beforeContent, afterContent, "a.go", "a.go", nil)
 	if len(changes) != 1 || changes[0].Type != SymbolRenamed || changes[0].BodySimilarity != 0.6 {
 		t.Fatalf("threshold changes = %#v", changes)
 	}

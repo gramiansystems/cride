@@ -238,7 +238,13 @@ func RankTextResultsWithReview(results []Result, current source.Location, review
 	ranked := make([]Result, 0, len(results))
 	for i, result := range results {
 		result.Score = max(0, 1000-i)
+		containsAddition, containsDeletion := result.Review.ContainsAddition, result.Review.ContainsDeletion
+		entireAddition, entireDeletion := result.Review.EntireAddition, result.Review.EntireDeletion
 		result.Review = diff.MarkersForIndex(review, result.Location.Path, result.Location.Line)
+		result.Review.ContainsAddition = containsAddition
+		result.Review.ContainsDeletion = containsDeletion
+		result.Review.EntireAddition = entireAddition
+		result.Review.EntireDeletion = entireDeletion
 		result.Score += reviewScore(result.Location, current, result.Review, review, false)
 		ranked = append(ranked, result)
 	}
@@ -311,7 +317,7 @@ func reviewScore(loc, current source.Location, markers diff.ReviewMarkers, revie
 			score += max(0, 1000-delta)
 		}
 	}
-	if markers.Changed {
+	if markers.Changed || markers.ContainsAddition || markers.ContainsDeletion {
 		score += 8000
 		if markers.Unread {
 			score += 1500
