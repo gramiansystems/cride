@@ -525,7 +525,7 @@ func searchCmd(src diffsource.Source, generation int, query string) tea.Cmd {
 func referenceSearchCmd(src diffsource.Source, client lsp.Client, generation int, kind referenceRequestKind, query navsearch.SymbolQuery) tea.Cmd {
 	if src == nil {
 		return func() tea.Msg {
-			return referenceLoadedMsg{generation: generation, kind: kind, query: query, source: navsearch.ResultSourceRG, err: errors.New("source unavailable")}
+			return referenceLoadedMsg{generation: generation, kind: kind, query: query, source: navsearch.ResultSourceLexical, err: errors.New("source unavailable")}
 		}
 	}
 	if client == nil {
@@ -573,27 +573,27 @@ func referenceSearchCmd(src diffsource.Source, client lsp.Client, generation int
 					generation: generation,
 					kind:       kind,
 					query:      query,
-					source:     navsearch.ResultSourceRG,
+					source:     navsearch.ResultSourceLexical,
 					status:     status,
-					results:    navsearch.DefinitionResultsFromTextResults(query.Symbol, results, navsearch.ResultSourceRG),
+					results:    navsearch.DefinitionResultsFromTextResults(query.Symbol, results, navsearch.ResultSourceLexical),
 				}
 			}
 		default:
 			results, err = src.SearchWord(query.Symbol)
 			if err == nil {
-				references := navsearch.ReferenceResultsFromTextResults(query.Symbol, results, navsearch.ResultSourceRG)
+				references := navsearch.ReferenceResultsFromTextResults(query.Symbol, results, navsearch.ResultSourceLexical)
 				references = expandVTableReferences(src, query.Symbol, references)
 				return referenceLoadedMsg{
 					generation: generation,
 					kind:       kind,
 					query:      query,
-					source:     navsearch.ResultSourceRG,
+					source:     navsearch.ResultSourceLexical,
 					status:     status,
 					results:    references,
 				}
 			}
 		}
-		return referenceLoadedMsg{generation: generation, kind: kind, query: query, source: navsearch.ResultSourceRG, status: status, err: err}
+		return referenceLoadedMsg{generation: generation, kind: kind, query: query, source: navsearch.ResultSourceLexical, status: status, err: err}
 	}
 }
 
@@ -616,7 +616,7 @@ func expandVTableReferences(src diffsource.Source, symbol string, results []navs
 		if err != nil {
 			continue
 		}
-		for _, result := range navsearch.ReferenceResultsFromTextResults(slot, matches, navsearch.ResultSourceRG) {
+		for _, result := range navsearch.ReferenceResultsFromTextResults(slot, matches, navsearch.ResultSourceLexical) {
 			key := lineKey{path: result.Location.Path, line: result.Location.Line, baseline: result.Side == navsearch.ResultSideBaseline}
 			if seen[key] {
 				continue
@@ -2001,7 +2001,7 @@ func (m *Model) openReferencesPanelError(kind referenceRequestKind, changedOnly 
 	m.referencePanel = referencePanelState{
 		Open:        true,
 		Kind:        kind,
-		Source:      navsearch.ResultSourceRG,
+		Source:      navsearch.ResultSourceLexical,
 		Generation:  m.referenceGeneration,
 		Order:       diff.ResultOrderReview,
 		ChangedOnly: changedOnly,
@@ -2017,7 +2017,7 @@ func (m *Model) openReferencesPanelForQuery(kind referenceRequestKind, changedOn
 		Open:        true,
 		Kind:        kind,
 		Query:       query,
-		Source:      navsearch.ResultSourceRG,
+		Source:      navsearch.ResultSourceLexical,
 		Generation:  m.referenceGeneration,
 		Order:       diff.ResultOrderReview,
 		ChangedOnly: changedOnly,

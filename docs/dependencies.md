@@ -17,7 +17,7 @@ Run these after adding imports, runtime commands, or release artifacts:
 go mod tidy -diff
 go list -m all
 go list -deps -f '{{with .Module}}{{if ne .Path "cride"}}{{.Path}} {{.Version}}{{end}}{{end}}' ./cmd/cride | sort -u
-rg -n 'exec\.Command|LookPath|os\.Getenv|XDG_|NO_COLOR|COLORTERM' internal cmd
+git grep -n -E 'exec\.Command|LookPath|os\.Getenv|XDG_|NO_COLOR|COLORTERM' -- internal cmd
 go version -m ./cride
 ```
 
@@ -30,7 +30,7 @@ target `GOOS`/`GOARCH` pair that will be shipped.
 | --- | --- | --- | --- |
 | Go 1.24+ | Building, testing, and installing from source | `go.mod`, `Makefile` | Not needed when running a prebuilt binary. |
 | `git` | All review sources and repository discovery | `internal/diffsource/worktree/vcs.go` | Hard requirement. Startup/source opening fails if `git` is unavailable or the target is not a Git repository. |
-| `rg` / ripgrep | Project search on the live worktree side, plus lexical symbol lookups that route through project search | `internal/diffsource/worktree/source.go` | Review still works. Search returns `ripgrep not found: install rg to use project search`. Baseline/ref searches use `git grep`. |
+| `rg` / ripgrep | Optional fast path for project search on the live worktree side, plus lexical symbol lookups that route through project search | `internal/diffsource/worktree/source.go` | If unavailable, live-worktree search falls back to `git grep --untracked`; baseline/ref searches already use `git grep`. |
 | `gopls` | Go LSP enrichments: diagnostics, hover, symbols, and call hierarchy | `internal/lsp/config.go`, `internal/lsp/process.go` | Optional. The LSP client reports the server unavailable and the app keeps working with lexical fallbacks. |
 | `rust-analyzer` | Rust LSP enrichments for `.rs` files | `internal/lsp/config.go`, `internal/lsp/process.go` | Optional, same unavailable/degraded behavior as `gopls`. |
 | `clangd` | C/C++ definitions, references, diagnostics, hover, symbols, and call hierarchy | `internal/lsp/config.go`, `internal/lsp/process.go` | Optional. Uses the project's compilation database when available; C/C++ lexical navigation and vtable-aware outlines remain available without it. |
@@ -135,8 +135,8 @@ Do not treat graph-only modules as CRIDE feature dependencies without checking
 
 ## Dependency Risk Notes
 
-- The runtime trust boundary is local: CRIDE executes `git`, `rg`, and optional
-  language-server commands from `PATH` against user workspaces.
+- The runtime trust boundary is local: CRIDE executes `git`, optional `rg`, and
+  optional language-server commands from `PATH` against user workspaces.
 - The application currently has no runtime network dependency.
 - The source tree has no explicit `cgo` imports. A release binary should still
   be checked with `go version -m` because the final `CGO_ENABLED` value is set

@@ -284,12 +284,12 @@ func TestBottomPanelLinesRenderStates(t *testing.T) {
 	}{
 		{
 			name:  "empty",
-			panel: BottomPanel{Open: true, Title: "References: Target", Summary: "0 results · rg", Empty: "No references"},
+			panel: BottomPanel{Open: true, Title: "References: Target", Summary: "0 results · lexical", Empty: "No references"},
 			want:  "No references",
 		},
 		{
 			name:  "loading",
-			panel: BottomPanel{Open: true, Title: "References: Target", Summary: "rg", Loading: true},
+			panel: BottomPanel{Open: true, Title: "References: Target", Summary: "lexical", Loading: true},
 			want:  "loading...",
 		},
 		{
@@ -302,7 +302,7 @@ func TestBottomPanelLinesRenderStates(t *testing.T) {
 			panel: BottomPanel{
 				Open:    true,
 				Title:   "References: Target",
-				Summary: "1 result · rg",
+				Summary: "1 result · lexical",
 				Results: []BottomPanelResult{{Label: "[def] a.go:2:1", Preview: "func Target() {}"}},
 			},
 			want: "[def] a.go:2:1",

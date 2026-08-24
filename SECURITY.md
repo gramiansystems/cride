@@ -28,8 +28,9 @@ a patch to be prepared before publishing details.
 
 ## Security boundaries
 
-cride operates on local source repositories and executes `git`, `rg`, and
-optional language servers found on `PATH`. It does not make application-level
-network requests, but those external tools process repository content and use
-the current user's permissions. Review untrusted repositories and executables
-with the same care you would use for other local developer tooling.
+cride operates on local source repositories and executes `git`, optional `rg`,
+and optional language servers found on `PATH`. It does not make
+application-level network requests, but those external tools process repository
+content and use the current user's permissions. Review untrusted repositories
+and executables with the same care you would use for other local developer
+tooling.

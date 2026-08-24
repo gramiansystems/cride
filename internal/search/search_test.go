@@ -217,7 +217,7 @@ func TestFirstNonKeywordIdentifierSkipsBuiltInTypes(t *testing.T) {
 	}
 }
 
-func TestReferenceResultsFromRipgrepResultsClassifiesDefinitions(t *testing.T) {
+func TestReferenceResultsFromLexicalSearchClassifiesDefinitions(t *testing.T) {
 	t.Parallel()
 
 	results := ReferenceResultsFromTextResults("Target", []Result{
@@ -229,7 +229,7 @@ func TestReferenceResultsFromRipgrepResultsClassifiesDefinitions(t *testing.T) {
 			Location: source.Location{Path: "a.go", Line: 8, Column: 9},
 			Preview:  "return Target()",
 		},
-	}, ResultSourceRG)
+	}, ResultSourceLexical)
 
 	if len(results) != 2 {
 		t.Fatalf("len(results) = %d, want 2", len(results))
@@ -240,8 +240,8 @@ func TestReferenceResultsFromRipgrepResultsClassifiesDefinitions(t *testing.T) {
 	if results[1].Kind != ReferenceReference {
 		t.Fatalf("second kind = %v, want ReferenceReference", results[1].Kind)
 	}
-	if results[0].Source != ResultSourceRG {
-		t.Fatalf("source = %v, want ResultSourceRG", results[0].Source)
+	if results[0].Source != ResultSourceLexical {
+		t.Fatalf("source = %v, want ResultSourceLexical", results[0].Source)
 	}
 }
 

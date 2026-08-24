@@ -367,9 +367,6 @@ func TestWorkingTreeSearchWordUsesWholeWordMatches(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
 	}
-	if _, err := exec.LookPath("rg"); err != nil {
-		t.Skip("rg not available")
-	}
 	dir := t.TempDir()
 	gitRun := func(args ...string) {
 		t.Helper()
@@ -399,6 +396,54 @@ func TestWorkingTreeSearchWordUsesWholeWordMatches(t *testing.T) {
 	}
 	if results[0].Location.Path != "a.go" || results[0].Location.Line != 2 || results[0].Location.Column != 1 {
 		t.Fatalf("result location = %+v, want a.go:2:1", results[0].Location)
+	}
+}
+
+func TestWorkingTreeSearchFallsBackToGitWithoutRipgrep(t *testing.T) {
+	gitPath, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git not available")
+	}
+	dir, gitRun, _ := newTestGitRepo(t)
+	gitRun("init", "-q")
+	writeFile(t, dir, "tracked.go", "Targeted()\nTarget()\n")
+	writeFile(t, dir, ".gitignore", "ignored.go\n")
+	gitRun("add", "tracked.go", ".gitignore")
+	writeFile(t, dir, "untracked.go", "Target()\n")
+	writeFile(t, dir, "ignored.go", "Target()\n")
+
+	src, err := Open(dir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	binDir := t.TempDir()
+	if err := os.Symlink(gitPath, filepath.Join(binDir, "git")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir)
+
+	results, err := src.SearchWord("Target")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("len(results) = %d, want tracked and untracked non-ignored matches: %+v", len(results), results)
+	}
+	got := map[string]bool{}
+	for _, result := range results {
+		got[result.Location.Path] = true
+		if result.Location.Line != 2 && result.Location.Path == "tracked.go" {
+			t.Errorf("tracked result = %+v, want line 2", result.Location)
+		}
+		if result.Location.Line != 1 && result.Location.Path == "untracked.go" {
+			t.Errorf("untracked result = %+v, want line 1", result.Location)
+		}
+	}
+	for _, path := range []string{"tracked.go", "untracked.go"} {
+		if !got[path] {
+			t.Errorf("results missing %q: %+v", path, results)
+		}
 	}
 }
 

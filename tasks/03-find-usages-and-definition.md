@@ -1,7 +1,7 @@
 # Syntax-aware navigation fallback
 
-> Status: LSP and lexical ripgrep definition/reference lookup are implemented.
-> This task tracks a possible syntax-aware tier between them.
+> Status: LSP and lexical definition/reference lookup are implemented. Ripgrep
+> is an optional fast path. This task tracks a possible syntax-aware tier.
 
 ## Problem
 
@@ -18,7 +18,8 @@ missing or unhealthy without making basic review depend on semantic tooling.
 - The symbol comes from the source row and visible character cursor.
 - LSP definitions/references are requested when a configured server is
   available.
-- Failures fall back to `rg -n -w` through the active `DiffSource`.
+- Failures fall back to whole-word search through the active `DiffSource`,
+  using ripgrep when available and Git otherwise.
 - Lexical classifiers identify likely definitions for supported languages.
 - Results are ranked by current location and review relevance, rendered in the
   reusable bottom panel, and can be opened in full-file context.
@@ -27,7 +28,7 @@ The current path must remain the fallback even if this task is implemented.
 
 ## Proposed tier
 
-Add an optional, pure-Go syntax-aware index between LSP and ripgrep:
+Add an optional, pure-Go syntax-aware index between LSP and lexical search:
 
 1. LSP `textDocument/definition` or `textDocument/references`.
 2. Syntax-aware definitions/references when a parser is available.
@@ -70,7 +71,7 @@ and behavior for languages without a bundled grammar.
 - An edit invalidates only the affected file's index entry.
 - Missing grammars and parser failures fall through to lexical search.
 - Definition and reference panels label and rank syntax-index results
-  consistently with LSP and ripgrep results.
+  consistently with LSP and lexical results.
 
 ## Open questions
 

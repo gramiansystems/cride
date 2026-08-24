@@ -307,13 +307,13 @@ func (s *Source) searchCurrent(query string, word bool) ([]search.Result, error)
 	if s.head != "" {
 		return s.gitGrepRef(s.head, query, word, search.ResultSideCurrent)
 	}
-	return s.ripgrep(query, word)
+	return s.searchWorktree(query, word)
 }
 
-func (s *Source) ripgrep(query string, word bool) ([]search.Result, error) {
+func (s *Source) searchWorktree(query string, word bool) ([]search.Result, error) {
 	rg, err := exec.LookPath("rg")
 	if err != nil {
-		return nil, fmt.Errorf("ripgrep not found: install rg to use project search")
+		return s.gitGrepWorktree(query, word)
 	}
 
 	args := []string{"--line-number", "--column", "--no-heading", "--color", "never"}
@@ -340,6 +340,29 @@ func (s *Source) ripgrep(query string, word bool) ([]search.Result, error) {
 	}
 
 	results := search.ParseRipgrepOutput(outb.Bytes())
+	for i := range results {
+		results[i].Location.Path = s.cleanSearchPath(results[i].Location.Path)
+		results[i].Label = fmt.Sprintf("%s:%d:%d", results[i].Location.Path, results[i].Location.Line, results[i].Location.Column)
+		results[i].Side = search.ResultSideCurrent
+	}
+	return results, nil
+}
+
+func (s *Source) gitGrepWorktree(query string, word bool) ([]search.Result, error) {
+	args := []string{"grep", "--line-number", "--column", "--no-color", "-I", "-E", "--untracked"}
+	if word {
+		args = append(args, "--word-regexp")
+	}
+	args = append(args, "-e", query, "--")
+	out, code, err := s.git.runCode(args...)
+	if err != nil {
+		return nil, err
+	}
+	if code == 1 || strings.TrimSpace(out) == "" {
+		return nil, nil
+	}
+
+	results := search.ParseRipgrepOutput([]byte(out))
 	for i := range results {
 		results[i].Location.Path = s.cleanSearchPath(results[i].Location.Path)
 		results[i].Label = fmt.Sprintf("%s:%d:%d", results[i].Location.Path, results[i].Location.Line, results[i].Location.Column)

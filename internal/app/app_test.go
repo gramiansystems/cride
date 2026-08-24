@@ -1288,11 +1288,11 @@ func TestBaselineReferenceResultJumpsToOldSideDiffRow(t *testing.T) {
 		referencePanel: referencePanelState{
 			Open:   true,
 			Query:  navsearch.SymbolQuery{Symbol: "Target"},
-			Source: navsearch.ResultSourceRG,
+			Source: navsearch.ResultSourceLexical,
 			Results: []navsearch.ReferenceResult{{
 				Location: source.Location{Path: "a.go", Line: 3, Column: 8},
 				Side:     navsearch.ResultSideBaseline,
-				Source:   navsearch.ResultSourceRG,
+				Source:   navsearch.ResultSourceLexical,
 			}},
 		},
 	}
@@ -1467,7 +1467,7 @@ func TestReferencePanelOrderToggleUsesSourceOrder(t *testing.T) {
 			Query: navsearch.SymbolQuery{
 				Symbol: "Target",
 			},
-			Source: navsearch.ResultSourceRG,
+			Source: navsearch.ResultSourceLexical,
 			RawResults: []navsearch.ReferenceResult{
 				{Location: source.Location{Path: "z.go", Line: 1, Column: 1}},
 				{Location: source.Location{Path: "a.go", Line: 5, Column: 1}},
@@ -1511,10 +1511,10 @@ func TestReferenceResultJumpKeepsCursorAboveBottomPanel(t *testing.T) {
 		referencePanel: referencePanelState{
 			Open:   true,
 			Query:  navsearch.SymbolQuery{Symbol: "Target"},
-			Source: navsearch.ResultSourceRG,
+			Source: navsearch.ResultSourceLexical,
 			Results: []navsearch.ReferenceResult{{
 				Location: source.Location{Path: "a.go", Line: 20, Column: 1},
-				Source:   navsearch.ResultSourceRG,
+				Source:   navsearch.ResultSourceLexical,
 			}},
 		},
 	}
@@ -1559,7 +1559,7 @@ func TestDeferredResultJumpCentersAfterFileLoad(t *testing.T) {
 		referencePanel: referencePanelState{
 			Open:   true,
 			Query:  navsearch.SymbolQuery{Symbol: "Target"},
-			Source: navsearch.ResultSourceRG,
+			Source: navsearch.ResultSourceLexical,
 		},
 	}
 

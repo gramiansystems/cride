@@ -18,8 +18,10 @@ separate from behavior changes.
 You need:
 
 - Go 1.24 or newer;
-- Git; and
-- ripgrep for exercising project search and lexical navigation.
+- Git.
+
+Ripgrep is optional. When installed, it provides the fast path for live
+worktree search; tests also cover the Git-based fallback.
 
 Optional language servers are listed in [the dependency guide](docs/dependencies.md).
 

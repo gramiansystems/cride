@@ -30,7 +30,7 @@ type ResultSource int
 const (
 	ResultSourceLSP ResultSource = iota
 	ResultSourceTreeSitter
-	ResultSourceRG
+	ResultSourceLexical
 )
 
 func (s ResultSource) String() string {
@@ -39,8 +39,8 @@ func (s ResultSource) String() string {
 		return "lsp"
 	case ResultSourceTreeSitter:
 		return "tree-sitter"
-	case ResultSourceRG:
-		return "rg"
+	case ResultSourceLexical:
+		return "lexical"
 	default:
 		return "unknown"
 	}

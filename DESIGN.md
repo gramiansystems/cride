@@ -68,7 +68,7 @@ syntax changes should remain backward-compatible with existing review files.
 ```text
                          background Bubble Tea commands
   git + filesystem  ---> DiffSource ---> diff parser --------+
-        rg / LSP    ---> search, outline, diagnostics --------+--> messages
+  git/rg + LSP      ---> search, outline, diagnostics --------+--> messages
   session/comments  ---> load and save commands --------------+       |
                                                                     v
   keyboard + mouse ------------------------------------------> app.Model

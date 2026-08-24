@@ -43,9 +43,9 @@ but it is not trying to replace your editor or Git client.
 ## Install
 
 Building from source requires [Go 1.24+](https://go.dev/dl/) and
-[Git](https://git-scm.com/downloads). Install
-[ripgrep](https://github.com/BurntSushi/ripgrep) as well for project search and
-lexical definition/reference lookup.
+[Git](https://git-scm.com/downloads). Project search uses
+[ripgrep](https://github.com/BurntSushi/ripgrep) when available and falls back
+to Git when it is not.
 
 After cloning this repository:
 
@@ -134,7 +134,8 @@ While editing, cride creates `.cride/editing.json` as an advisory lock and
 defers worktree reloads. The [editing guide](docs/review-expansion-and-editing.md)
 documents the supported commands and conflict behavior.
 
-Definitions and references work lexically through ripgrep out of the box.
+Definitions and references have a built-in lexical fallback, accelerated by
+ripgrep when it is available.
 cride starts these language servers lazily when their executable is available:
 
 | Executable | Languages |

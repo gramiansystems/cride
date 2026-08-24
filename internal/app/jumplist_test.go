@@ -31,7 +31,7 @@ func jumpTestModel() Model {
 func referenceTo(path string, line int) navsearch.ReferenceResult {
 	return navsearch.ReferenceResult{
 		Location: source.Location{Path: path, Line: line, Column: 1},
-		Source:   navsearch.ResultSourceRG,
+		Source:   navsearch.ResultSourceLexical,
 	}
 }
 
@@ -177,7 +177,7 @@ func TestJumpKeysWorkWithReferencePanelStillOpen(t *testing.T) {
 	m.referencePanel = referencePanelState{
 		Open:   true,
 		Query:  navsearch.SymbolQuery{Symbol: "Target"},
-		Source: navsearch.ResultSourceRG,
+		Source: navsearch.ResultSourceLexical,
 		Results: []navsearch.ReferenceResult{
 			referenceTo("b.go", 15),
 			referenceTo("a.go", 1),
