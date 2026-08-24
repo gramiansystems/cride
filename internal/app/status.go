@@ -152,9 +152,9 @@ func (m Model) contextualHints() []string {
 	case m.overlay.Kind != OverlayNone:
 		return []string{"type to filter", "`enter`accept", "`^O`order", "`esc`close"}
 	case m.enrichmentPanel.Open && m.enrichmentPanel.Kind == enrichmentPanelOutlineDiff:
-		return []string{"`j/k`select", "`enter`jump", "`s`file/review", "`o`order", "`esc`close"}
+		return []string{"`j/k`select", "`enter`jump", "`^W`dock", "`s`file/review", "`esc`close"}
 	case m.enrichmentPanel.Open || m.referencePanel.Open:
-		return []string{"`j/k`select", "`enter`jump", "`o`order", "`esc`close"}
+		return []string{"`j/k`select", "`enter`jump", "`^W`dock", "`o`order", "`esc`close"}
 	case m.viewMode == ViewFile:
 		hints := []string{"`j/k`move", "`tab`diff", "`gd`def", "`gr`refs", "`^P`open"}
 		if len(m.jumplist) > 0 {

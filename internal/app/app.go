@@ -64,6 +64,15 @@ const (
 	enrichmentPanelCallOutgoing
 )
 
+type paneResizeKind int
+
+const (
+	resizeNone paneResizeKind = iota
+	resizeChangeList
+	resizeResultHeight
+	resizeResultWidth
+)
+
 const (
 	searchDebounceDelay = 150 * time.Millisecond
 	overlayResultLimit  = 80
@@ -168,14 +177,20 @@ type Model struct {
 	searchKey    searchMatchKey
 	fileSearches map[string]searchMemo
 
-	focus         paneID
-	listCursor    int
-	listTop       int
-	collapsedDirs map[string]bool
-	changeOrder   ui.ChangeListOrder
-	changeClock   int
-	changeOrdinal map[string]int
-	changeHashes  map[string]string
+	focus           paneID
+	listCursor      int
+	listTop         int
+	changeListWidth int
+	collapsedDirs   map[string]bool
+	changeOrder     ui.ChangeListOrder
+	changeClock     int
+	changeOrdinal   map[string]int
+	changeHashes    map[string]string
+
+	resultPanelPlacement ui.PanelPlacement
+	resultPanelHeight    int
+	resultPanelWidth     int
+	resizingPane         paneResizeKind
 
 	splitFiles      map[string]bool // per-file side-by-side toggle (zs)
 	splitActiveLeft bool            // which pair column symbol lookups use
@@ -1428,6 +1443,17 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if m.overlay.Kind != OverlayNone {
 		return m.handleOverlayMouse(msg)
 	}
+	if msg.Action == tea.MouseActionRelease {
+		m.resizingPane = resizeNone
+		return m, nil
+	}
+	if m.resizingPane != resizeNone && msg.Action == tea.MouseActionMotion {
+		m.resizePaneAt(msg.X, msg.Y)
+		return m, nil
+	}
+	if msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress && m.startPaneResize(msg.X, msg.Y) {
+		return m, nil
+	}
 
 	switch msg.Button {
 	case tea.MouseButtonWheelUp:
@@ -1443,6 +1469,53 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m.handleMouseClick(msg)
 	default:
 		return m, nil
+	}
+}
+
+func (m *Model) startPaneResize(x, y int) bool {
+	layout := m.mainLayout()
+	if m.enrichmentPanel.Open || m.referencePanel.Open {
+		switch m.resultPanelPlacement {
+		case ui.PanelRight:
+			if y >= layout.ResultPanelY && y < layout.ResultPanelY+layout.ResultPanelHeight &&
+				(x == layout.ResultPanelX || x == layout.ResultPanelX-1) {
+				m.resizingPane = resizeResultWidth
+				return true
+			}
+		default:
+			if x >= layout.ResultPanelX && x < layout.ResultPanelX+layout.ResultPanelWidth &&
+				(y == layout.ResultPanelY || y == layout.ResultPanelY-1) {
+				m.resizingPane = resizeResultHeight
+				return true
+			}
+		}
+	}
+	if y >= layout.BodyY && y < layout.BodyY+layout.BodyHeight &&
+		(x == layout.LeftOuterWidth-1 || x == layout.LeftOuterWidth) {
+		m.resizingPane = resizeChangeList
+		return true
+	}
+	return false
+}
+
+func (m *Model) resizePaneAt(x, y int) {
+	switch m.resizingPane {
+	case resizeChangeList:
+		m.changeListWidth = max(2, x+1)
+		m.changeListWidth = m.mainLayout().LeftOuterWidth
+	case resizeResultHeight:
+		// The footer owns the final terminal row.
+		m.resultPanelHeight = max(3, m.height-1-y)
+		m.resultPanelHeight = m.mainLayout().ResultPanelHeight
+	case resizeResultWidth:
+		m.resultPanelWidth = max(2, m.width-x)
+		m.resultPanelWidth = m.mainLayout().ResultPanelWidth
+	}
+	m.clampScroll()
+	if m.enrichmentPanel.Open {
+		m.clampEnrichmentCursor()
+	} else if m.referencePanel.Open {
+		m.clampReferenceCursor()
 	}
 }
 
@@ -1488,7 +1561,8 @@ func (m Model) handleOverlayMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 
 func (m *Model) handleMouseWheel(delta int, msg tea.MouseMsg) {
 	layout := m.mainLayout()
-	if msg.Y >= layout.BottomPanelY && msg.Y < layout.BottomPanelY+layout.BottomPanelHeight {
+	if msg.X >= layout.ResultPanelX && msg.X < layout.ResultPanelX+layout.ResultPanelWidth &&
+		msg.Y >= layout.ResultPanelY && msg.Y < layout.ResultPanelY+layout.ResultPanelHeight {
 		m.handleBottomPanelWheel(delta)
 		return
 	}
@@ -1509,8 +1583,9 @@ func (m *Model) handleBottomPanelWheel(delta int) {
 func (m Model) handleMouseClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	layout := m.mainLayout()
 
-	if msg.Y >= layout.BottomPanelY && msg.Y < layout.BottomPanelY+layout.BottomPanelHeight {
-		return m.handleBottomPanelClick(msg.Y - layout.BottomPanelY - 1)
+	if msg.X >= layout.ResultPanelX && msg.X < layout.ResultPanelX+layout.ResultPanelWidth &&
+		msg.Y >= layout.ResultPanelY && msg.Y < layout.ResultPanelY+layout.ResultPanelHeight {
+		return m.handleBottomPanelClick(msg.Y - layout.ResultPanelY - 1)
 	}
 
 	if msg.Y < layout.ContentY || msg.Y >= layout.ContentY+layout.ContentHeight {
@@ -1612,6 +1687,8 @@ func (m Model) handleReferencePanelKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool
 		return m, nil, true
 	case "o":
 		return m, m.executeCommand(commandToggleResultOrder, 1, false), true
+	case "ctrl+w":
+		return m, m.executeCommand(commandToggleResultDock, 1, false), true
 	default:
 		return m, nil, false
 	}
@@ -1649,6 +1726,8 @@ func (m Model) handleEnrichmentPanelKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, boo
 			return m, nil, false
 		}
 		return m, m.executeCommand(commandToggleResultOrder, 1, false), true
+	case "ctrl+w":
+		return m, m.executeCommand(commandToggleResultDock, 1, false), true
 	case "s":
 		if m.enrichmentPanel.Kind != enrichmentPanelOutlineDiff {
 			return m, nil, false
@@ -1771,14 +1850,15 @@ func (m Model) View() string {
 	matches := append(m.uiMatchSpans(), m.symbolChoiceSpans()...)
 	matches = append(matches, m.cursorSpan()...)
 	out := ui.RenderWithOptions(m.files, m.renderRows(), m.selectedFile, m.cursor, m.top, m.width, m.height, m.hl, m.source.Baseline(), m.viewMode == ViewFile, m.bottomPanelView(), ui.RenderOptions{
-		LSPStatus:      m.semanticStatusLine(),
-		TopWrap:        m.topWrap,
-		Footer:         m.footerView(),
-		Matches:        matches,
-		ChangeList:     &listView,
-		Composer:       m.composerView(),
-		Breadcrumb:     m.outlineBreadcrumb(),
-		ShowBreadcrumb: m.showOutlineBreadcrumb(),
+		LSPStatus:       m.semanticStatusLine(),
+		TopWrap:         m.topWrap,
+		Footer:          m.footerView(),
+		Matches:         matches,
+		ChangeList:      &listView,
+		ChangeListWidth: m.changeListWidth,
+		Composer:        m.composerView(),
+		Breadcrumb:      m.outlineBreadcrumb(),
+		ShowBreadcrumb:  m.showOutlineBreadcrumb(),
 	})
 	if m.overlay.Kind != OverlayNone && m.overlay.Kind != OverlaySymbolChoice {
 		out = ui.RenderOverlay(out, m.overlayView(), m.width, m.height)
@@ -2240,6 +2320,24 @@ func (m *Model) toggleEnrichmentOrder() {
 	m.clampEnrichmentCursor()
 }
 
+func (m *Model) toggleResultPanelDock() {
+	if !m.enrichmentPanel.Open && !m.referencePanel.Open {
+		return
+	}
+	if m.resultPanelPlacement == ui.PanelRight {
+		m.resultPanelPlacement = ui.PanelBottom
+	} else {
+		m.resultPanelPlacement = ui.PanelRight
+	}
+	m.resizingPane = resizeNone
+	m.clampScroll()
+	if m.enrichmentPanel.Open {
+		m.clampEnrichmentCursor()
+	} else {
+		m.clampReferenceCursor()
+	}
+}
+
 func nextResultOrder(order diff.ResultOrder) diff.ResultOrder {
 	if order == diff.ResultOrderSource {
 		return diff.ResultOrderReview
@@ -2313,11 +2411,15 @@ func (m Model) overlayPageSize() int {
 }
 
 func (m Model) referencePageSize() int {
-	return ui.BottomPanelResultHeight(m.referencePanelViewValue(), m.width, m.height)
+	panel := m.referencePanelViewValue()
+	m.configureResultPanel(&panel)
+	return ui.BottomPanelResultHeight(panel, m.width, m.height)
 }
 
 func (m Model) enrichmentPageSize() int {
-	return ui.BottomPanelResultHeight(m.enrichmentPanelViewValue(), m.width, m.height)
+	panel := m.enrichmentPanelViewValue()
+	m.configureResultPanel(&panel)
+	return ui.BottomPanelResultHeight(panel, m.width, m.height)
 }
 
 func (m *Model) acceptOverlayResult() tea.Cmd {
@@ -2574,9 +2676,26 @@ func (m Model) bottomPanelView() *ui.BottomPanel {
 	}
 	if m.enrichmentPanel.Open {
 		panel := m.enrichmentPanelViewValue()
+		m.configureResultPanel(&panel)
 		return &panel
 	}
-	return m.referencePanelView()
+	panel := m.referencePanelView()
+	if panel != nil {
+		m.configureResultPanel(panel)
+	}
+	return panel
+}
+
+func (m Model) configureResultPanel(panel *ui.BottomPanel) {
+	if panel == nil {
+		return
+	}
+	panel.Placement = m.resultPanelPlacement
+	if panel.Placement == ui.PanelRight {
+		panel.Size = m.resultPanelWidth
+	} else {
+		panel.Size = m.resultPanelHeight
+	}
 }
 
 func (m Model) referencePanelView() *ui.BottomPanel {

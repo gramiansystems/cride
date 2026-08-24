@@ -312,6 +312,43 @@ func TestBottomPanelLinesRenderStates(t *testing.T) {
 	}
 }
 
+func TestRightDockedResultPanelUsesWideFullHeightLayout(t *testing.T) {
+	t.Parallel()
+
+	panel := BottomPanel{Open: true, Placement: PanelRight, Title: "References"}
+	layout := LayoutWithPanelSizes(160, 40, &panel, false, 0)
+	if layout.ResultPanelWidth != 64 {
+		t.Fatalf("right panel width = %d, want 64", layout.ResultPanelWidth)
+	}
+	if layout.ResultPanelX != 96 || layout.ResultPanelY != 1 || layout.ResultPanelHeight != 38 {
+		t.Fatalf("right panel geometry = x%d y%d %dx%d, want x96 y1 64x38",
+			layout.ResultPanelX, layout.ResultPanelY, layout.ResultPanelWidth, layout.ResultPanelHeight)
+	}
+	if layout.BottomPanelHeight != 0 {
+		t.Fatalf("right dock reserved bottom height %d", layout.BottomPanelHeight)
+	}
+
+	bottom := panel
+	bottom.Placement = PanelBottom
+	if right, below := BottomPanelResultHeight(panel, 160, 40), BottomPanelResultHeight(bottom, 160, 40); right <= below {
+		t.Fatalf("right panel page = %d, bottom page = %d; want more rows on right", right, below)
+	}
+}
+
+func TestLayoutHonorsDraggedPanelSizes(t *testing.T) {
+	t.Parallel()
+
+	bottom := BottomPanel{Open: true, Size: 14}
+	if got := LayoutWithPanelSizes(160, 40, &bottom, false, 42); got.BottomPanelHeight != 14 || got.LeftOuterWidth != 42 {
+		t.Fatalf("bottom/list sizes = %d/%d, want 14/42", got.BottomPanelHeight, got.LeftOuterWidth)
+	}
+
+	right := BottomPanel{Open: true, Placement: PanelRight, Size: 55}
+	if got := LayoutWithPanelSizes(160, 40, &right, false, 42); got.ResultPanelWidth != 55 || got.LeftOuterWidth != 42 {
+		t.Fatalf("right/list sizes = %d/%d, want 55/42", got.ResultPanelWidth, got.LeftOuterWidth)
+	}
+}
+
 var ansiPattern = regexp.MustCompile(`\x1b\[[0-?]*[ -/]*[@-~]`)
 
 func stripANSI(s string) string {

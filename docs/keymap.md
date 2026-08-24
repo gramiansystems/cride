@@ -45,6 +45,7 @@ Press `?` (or `F1`, `g?`) inside cride for the categorized, executable command p
 | `zO/zC` | Expand or collapse context for all hunks in the file |
 | `tab, zf` | Toggle full-file view |
 | `zs` | Toggle side-by-side diff |
+| `ctrl+w` | Dock the active result panel on the right or bottom |
 | `ctrl+r` | Reload the diff and import review.md |
 
 ## Editing (vim-style, current-side lines only)
@@ -98,6 +99,7 @@ Press `?` (or `F1`, `g?`) inside cride for the categorized, executable command p
 | Keys | Action |
 | --- | --- |
 | `wheel` | Scroll the code pane or active result panel |
+| `drag panel border` | Resize the change list or active result panel |
 | `click file list` | Select a changed file |
 | `click code row` | Move the cursor to that row |
 

@@ -77,15 +77,27 @@ type BottomPanel struct {
 	Open    bool
 	Title   string
 	Summary string
-	Cursor  int
-	Top     int
-	Results []BottomPanelResult
-	Loading bool
+	// Placement controls whether this result panel is docked below the review
+	// or beside it. Size is the outer height for bottom panels and the outer
+	// width for right panels; zero selects the responsive default.
+	Placement PanelPlacement
+	Size      int
+	Cursor    int
+	Top       int
+	Results   []BottomPanelResult
+	Loading   bool
 	// Spinner is the current spinner frame, shown in the title while loading.
 	Spinner string
 	Error   string
 	Empty   string
 }
+
+type PanelPlacement int
+
+const (
+	PanelBottom PanelPlacement = iota
+	PanelRight
+)
 
 type BottomPanelResult struct {
 	Label   string
@@ -116,6 +128,9 @@ type RenderOptions struct {
 	Matches []MatchSpan
 	// ChangeList overrides the default (unfocused, fully expanded) list view.
 	ChangeList *ChangeListView
+	// ChangeListWidth is the requested outer width of the change-list pane.
+	// Zero keeps the responsive default.
+	ChangeListWidth int
 	// Composer renders the comment input in the bottom-panel slot.
 	Composer *Composer
 }
@@ -156,6 +171,10 @@ type MainLayout struct {
 	DiffRowsHeight    int
 	BottomPanelY      int
 	BottomPanelHeight int
+	ResultPanelX      int
+	ResultPanelY      int
+	ResultPanelWidth  int
+	ResultPanelHeight int
 }
 
 func Layout(width, height int, panel *BottomPanel) MainLayout {
@@ -164,6 +183,13 @@ func Layout(width, height int, panel *BottomPanel) MainLayout {
 
 // LayoutWithBreadcrumb accounts for the optional sticky symbol row.
 func LayoutWithBreadcrumb(width, height int, panel *BottomPanel, showBreadcrumb bool) MainLayout {
+	return LayoutWithPanelSizes(width, height, panel, showBreadcrumb, 0)
+}
+
+// LayoutWithPanelSizes calculates review and result-panel geometry while
+// honoring a user-resized change list. The simpler Layout helpers retain the
+// original responsive defaults for callers that do not manage pane sizes.
+func LayoutWithPanelSizes(width, height int, panel *BottomPanel, showBreadcrumb bool, changeListSize int) MainLayout {
 	headerH := headerHeight
 	footerH := footerHeight
 	panelHeight := BottomPanelHeight(panel, height)
@@ -173,14 +199,25 @@ func LayoutWithBreadcrumb(width, height int, panel *BottomPanel, showBreadcrumb 
 	}
 	contentHeight := bodyHeight - panelBorderH
 
-	leftOuterWidth := changeListWidth
-	if width < leftOuterWidth+28 {
-		leftOuterWidth = max(18, width/3)
+	mainWidth := width
+	rightPanelWidth := 0
+	if panel != nil && panel.Open && panel.Placement == PanelRight {
+		rightPanelWidth = RightPanelWidth(panel, width)
+		mainWidth = width - rightPanelWidth
 	}
-	if leftOuterWidth > width-12 {
-		leftOuterWidth = max(8, width-12)
+
+	leftOuterWidth := changeListSize
+	if leftOuterWidth <= 0 {
+		leftOuterWidth = changeListWidth
 	}
-	rightOuterWidth := width - leftOuterWidth
+	if mainWidth < leftOuterWidth+28 {
+		leftOuterWidth = max(18, mainWidth/3)
+	}
+	if leftOuterWidth > mainWidth-12 {
+		leftOuterWidth = max(8, mainWidth-12)
+	}
+	leftOuterWidth = min(max(2, leftOuterWidth), max(2, mainWidth-2))
+	rightOuterWidth := mainWidth - leftOuterWidth
 	if rightOuterWidth < 8 {
 		rightOuterWidth = 8
 	}
@@ -190,7 +227,7 @@ func LayoutWithBreadcrumb(width, height int, panel *BottomPanel, showBreadcrumb 
 		diffHeaderHeight++
 	}
 	contentY := headerH + 1
-	return MainLayout{
+	layout := MainLayout{
 		HeaderHeight:      headerH,
 		BodyY:             headerH,
 		BodyHeight:        bodyHeight,
@@ -205,6 +242,19 @@ func LayoutWithBreadcrumb(width, height int, panel *BottomPanel, showBreadcrumb 
 		BottomPanelY:      headerH + bodyHeight,
 		BottomPanelHeight: panelHeight,
 	}
+	if panel != nil && panel.Open {
+		if panel.Placement == PanelRight {
+			layout.ResultPanelX = mainWidth
+			layout.ResultPanelY = headerH
+			layout.ResultPanelWidth = rightPanelWidth
+			layout.ResultPanelHeight = bodyHeight
+		} else {
+			layout.ResultPanelY = layout.BottomPanelY
+			layout.ResultPanelWidth = width
+			layout.ResultPanelHeight = panelHeight
+		}
+	}
+	return layout
 }
 
 // Render produces the full screen for the static review view.
@@ -212,13 +262,13 @@ func Render(files []diff.FileDiff, rows []Row, selectedFile, cursor, top, width,
 	return RenderWithPanel(files, rows, selectedFile, cursor, top, width, height, hl, baseline, fullFile, nil)
 }
 
-// RenderWithPanel produces the full screen with an optional bottom result
+// RenderWithPanel produces the full screen with an optional docked result
 // panel.
 func RenderWithPanel(files []diff.FileDiff, rows []Row, selectedFile, cursor, top, width, height int, hl *highlight.Highlighter, baseline string, fullFile bool, panel *BottomPanel) string {
 	return RenderWithOptions(files, rows, selectedFile, cursor, top, width, height, hl, baseline, fullFile, panel, RenderOptions{})
 }
 
-// RenderWithOptions produces the full screen with optional bottom panel and
+// RenderWithOptions produces the full screen with an optional result panel and
 // status metadata.
 func RenderWithOptions(files []diff.FileDiff, rows []Row, selectedFile, cursor, top, width, height int, hl *highlight.Highlighter, baseline string, fullFile bool, panel *BottomPanel, options RenderOptions) string {
 	if width <= 0 || height <= 0 {
@@ -236,7 +286,7 @@ func RenderWithOptions(files []diff.FileDiff, rows []Row, selectedFile, cursor, 
 	}
 	footer := RenderFooter(*footerModel, width)
 	panelHeight := BottomPanelHeight(panel, height)
-	layout := LayoutWithBreadcrumb(width, height, panel, options.ShowBreadcrumb)
+	layout := LayoutWithPanelSizes(width, height, panel, options.ShowBreadcrumb, options.ChangeListWidth)
 	contentHeight := layout.ContentHeight
 	leftOuterWidth := layout.LeftOuterWidth
 	rightOuterWidth := layout.RightOuterWidth
@@ -249,7 +299,12 @@ func RenderWithOptions(files []diff.FileDiff, rows []Row, selectedFile, cursor, 
 	listFocused := listView.Focused
 	left := boxWithBorder(leftOuterWidth, contentHeight, changeListLines(*listView, files, leftOuterWidth-2), paneBorderStyle(listFocused))
 	center := boxWithBorder(rightOuterWidth, contentHeight, diffPanelLines(files, rows, selectedFile, cursor, top, options.TopWrap, rightOuterWidth-2, contentHeight, hl, fullFile, options.Matches, !isCommitComparison(baseline), options.Breadcrumb, options.ShowBreadcrumb), paneBorderStyle(!listFocused))
-	body := lipgloss.JoinHorizontal(lipgloss.Top, left, center)
+	bodyParts := []string{left, center}
+	if panel != nil && panel.Open && panel.Placement == PanelRight && layout.ResultPanelWidth > 0 {
+		content := max(1, layout.ResultPanelHeight-2)
+		bodyParts = append(bodyParts, box(layout.ResultPanelWidth, content, bottomPanelLines(*panel, layout.ResultPanelWidth-2, content)))
+	}
+	body := lipgloss.JoinHorizontal(lipgloss.Top, bodyParts...)
 
 	parts := []string{header, body}
 	if panelHeight > 0 {
@@ -269,8 +324,12 @@ func RenderWithOptions(files []diff.FileDiff, rows []Row, selectedFile, cursor, 
 }
 
 func BottomPanelHeight(panel *BottomPanel, totalHeight int) int {
-	if panel == nil || !panel.Open || totalHeight <= 0 {
+	if panel == nil || !panel.Open || panel.Placement == PanelRight || totalHeight <= 0 {
 		return 0
+	}
+	available := max(0, totalHeight-headerHeight-footerHeight)
+	if panel.Size > 0 {
+		return min(max(3, panel.Size), max(3, available-3))
 	}
 	height := min(8, max(5, totalHeight/3))
 	if height > totalHeight/2 {
@@ -279,8 +338,27 @@ func BottomPanelHeight(panel *BottomPanel, totalHeight int) int {
 	return height
 }
 
+// RightPanelWidth returns the clamped outer width of a right-docked result
+// panel. The default deliberately favors a wide-screen layout while leaving
+// enough room for the change list and a useful diff pane.
+func RightPanelWidth(panel *BottomPanel, totalWidth int) int {
+	if panel == nil || !panel.Open || panel.Placement != PanelRight || totalWidth <= 0 {
+		return 0
+	}
+	desired := panel.Size
+	if desired <= 0 {
+		desired = max(40, totalWidth*2/5)
+	}
+	maxWidth := max(2, totalWidth-28)
+	minWidth := min(24, maxWidth)
+	return min(max(minWidth, desired), maxWidth)
+}
+
 func BottomPanelResultHeight(panel BottomPanel, width, height int) int {
 	panelHeight := BottomPanelHeight(&panel, height)
+	if panel.Open && panel.Placement == PanelRight {
+		panelHeight = max(3, height-headerHeight-footerHeight)
+	}
 	if panelHeight == 0 {
 		return 1
 	}
@@ -292,11 +370,14 @@ func BottomPanelResultHeight(panel BottomPanel, width, height int) int {
 	return max(1, contentHeight-used)
 }
 
-// BottomPanelResultIndexAt maps a zero-based line inside the bottom panel's
+// BottomPanelResultIndexAt maps a zero-based line inside the docked panel's
 // content box to a result index, mirroring bottomPanelLines. Returns -1 for
 // the title/status lines or empty space.
 func BottomPanelResultIndexAt(panel BottomPanel, totalHeight, innerY int) int {
 	panelHeight := BottomPanelHeight(&panel, totalHeight)
+	if panel.Open && panel.Placement == PanelRight {
+		panelHeight = max(3, totalHeight-headerHeight-footerHeight)
+	}
 	if panelHeight == 0 {
 		return -1
 	}

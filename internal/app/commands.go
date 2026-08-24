@@ -157,6 +157,7 @@ const (
 	commandToggleFileListOrder   = "files.toggle-order"
 	commandToggleFullFile        = "view.toggle-full-file"
 	commandToggleOutlineScope    = "symbols.toggle-outline-scope"
+	commandToggleResultDock      = "view.toggle-result-dock"
 	commandToggleResultOrder     = "navigation.toggle-result-order"
 	commandToggleSideBySide      = "view.toggle-side-by-side"
 	commandWorkspaceSymbols      = "symbols.workspace"
@@ -550,6 +551,10 @@ var commandCatalog = []Command{
 		}
 		return nil
 	})),
+	command(commandToggleResultDock, "Dock results right/bottom", "ctrl+w", "Move the active references, diagnostics, symbols, or call results between the bottom and right side.", reviewOnly(func(c CommandContext) tea.Cmd {
+		c.Model.toggleResultPanelDock()
+		return nil
+	})),
 	command(commandToggleResultOrder, "Toggle result order", "o / ctrl+o", "Toggle the active results panel between review and source order.", reviewOnly(func(c CommandContext) tea.Cmd {
 		switch {
 		case c.Model.enrichmentPanel.Open && c.Model.enrichmentPanel.Kind != enrichmentPanelHover:
@@ -642,6 +647,7 @@ func commandPaletteCategory(id string) CommandCategory {
 		commandFocusChangeList,
 		commandFocusDiff,
 		commandToggleFullFile,
+		commandToggleResultDock,
 		commandToggleResultOrder,
 		commandToggleSideBySide:
 		return CommandCategoryView

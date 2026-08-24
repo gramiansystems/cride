@@ -5,7 +5,7 @@ import (
 )
 
 func (m Model) mainLayout() ui.MainLayout {
-	return ui.LayoutWithBreadcrumb(m.width, m.height, m.bottomPanelView(), m.showOutlineBreadcrumb())
+	return ui.LayoutWithPanelSizes(m.width, m.height, m.bottomPanelView(), m.showOutlineBreadcrumb(), m.changeListWidth)
 }
 
 // wrapCacheKey captures everything the wrap layout depends on. rowsVersion is
@@ -49,7 +49,7 @@ func (m *Model) layoutFor(rows []ui.Row) *ui.WrapLayout {
 }
 
 func (m *Model) diffContentWidth() int {
-	return ui.Layout(m.width, m.height, nil).DiffContentWidth
+	return m.mainLayout().DiffContentWidth
 }
 
 // topScreenLine converts the (top row, wrap offset) scroll state into an
