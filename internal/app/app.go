@@ -1276,7 +1276,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// The armed find-char target must be consumed before any panel handler
-	// can claim the key (panels take j/k/o for list navigation).
+	// can claim the key (panels take J/K/o for list navigation).
 	if m.pendingFind != 0 {
 		kind := m.pendingFind
 		m.pendingFind = 0
@@ -1743,10 +1743,10 @@ func (m Model) handleReferencePanelKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool
 		return m, m.executeCommand(commandCloseActivePanel, 1, false), true
 	case "enter":
 		return m, m.acceptReferenceResult(), true
-	case "up", "k", "ctrl+p":
+	case "up", "K", "ctrl+p":
 		m.moveReferenceCursor(-1)
 		return m, nil, true
-	case "down", "j", "ctrl+n":
+	case "down", "J", "ctrl+n":
 		m.moveReferenceCursor(1)
 		return m, nil, true
 	case "pgup":
@@ -1773,13 +1773,13 @@ func (m Model) handleEnrichmentPanelKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, boo
 			return m, nil, true
 		}
 		return m, m.acceptEnrichmentResult(), true
-	case "up", "k", "ctrl+p":
+	case "up", "K", "ctrl+p":
 		if m.enrichmentPanel.Kind == enrichmentPanelHover {
 			return m, nil, false
 		}
 		m.moveEnrichmentCursor(-1)
 		return m, nil, true
-	case "down", "j", "ctrl+n":
+	case "down", "J", "ctrl+n":
 		if m.enrichmentPanel.Kind == enrichmentPanelHover {
 			return m, nil, false
 		}

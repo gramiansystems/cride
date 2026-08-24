@@ -1489,6 +1489,79 @@ func TestReferencePanelOrderToggleUsesSourceOrder(t *testing.T) {
 	}
 }
 
+func TestResultPanelUsesUppercaseJKAndLeavesLowercaseNavigationToFile(t *testing.T) {
+	t.Parallel()
+
+	m := Model{
+		files:        []diff.FileDiff{testFileWithLines("a.go", 4), testFile("b.go")},
+		selectedFile: 0,
+		cursor:       1,
+		col:          1,
+		desiredCol:   1,
+		width:        100,
+		height:       24,
+		enrichmentPanel: enrichmentPanelState{
+			Open:    true,
+			Kind:    enrichmentPanelDocumentSymbols,
+			Cursor:  1,
+			Results: []enrichmentResult{{Label: "one"}, {Label: "two"}, {Label: "three"}},
+		},
+	}
+
+	m = press(m, "j")
+	if m.cursor != 2 || m.enrichmentPanel.Cursor != 1 {
+		t.Fatalf("j file/result cursors = %d/%d, want 2/1", m.cursor, m.enrichmentPanel.Cursor)
+	}
+	m = press(m, "k")
+	if m.cursor != 1 || m.enrichmentPanel.Cursor != 1 {
+		t.Fatalf("k file/result cursors = %d/%d, want 1/1", m.cursor, m.enrichmentPanel.Cursor)
+	}
+	m = press(m, "l")
+	m = press(m, "h")
+	if m.col != 1 || m.enrichmentPanel.Cursor != 1 {
+		t.Fatalf("h/l file column/result cursor = %d/%d, want 1/1", m.col, m.enrichmentPanel.Cursor)
+	}
+
+	m = press(m, "J")
+	if m.enrichmentPanel.Cursor != 2 || m.cursor != 1 || m.selectedFile != 0 {
+		t.Fatalf("J result/file/file-index = %d/%d/%d, want 2/1/0", m.enrichmentPanel.Cursor, m.cursor, m.selectedFile)
+	}
+	m = press(m, "K")
+	if m.enrichmentPanel.Cursor != 1 || m.cursor != 1 || m.enrichmentPanel.Kind != enrichmentPanelDocumentSymbols {
+		t.Fatalf("K result/file/kind = %d/%d/%v, want 1/1/document symbols", m.enrichmentPanel.Cursor, m.cursor, m.enrichmentPanel.Kind)
+	}
+}
+
+func TestReferencePanelUsesUppercaseJK(t *testing.T) {
+	t.Parallel()
+
+	m := Model{
+		files:        []diff.FileDiff{testFileWithLines("a.go", 4)},
+		selectedFile: 0,
+		cursor:       1,
+		width:        100,
+		height:       24,
+		referencePanel: referencePanelState{
+			Open:    true,
+			Cursor:  1,
+			Results: []navsearch.ReferenceResult{{}, {}, {}},
+		},
+	}
+
+	m = press(m, "j")
+	if m.cursor != 2 || m.referencePanel.Cursor != 1 {
+		t.Fatalf("j file/result cursors = %d/%d, want 2/1", m.cursor, m.referencePanel.Cursor)
+	}
+	m = press(m, "J")
+	if m.cursor != 2 || m.referencePanel.Cursor != 2 {
+		t.Fatalf("J file/result cursors = %d/%d, want 2/2", m.cursor, m.referencePanel.Cursor)
+	}
+	m = press(m, "K")
+	if m.cursor != 2 || m.referencePanel.Cursor != 1 {
+		t.Fatalf("K file/result cursors = %d/%d, want 2/1", m.cursor, m.referencePanel.Cursor)
+	}
+}
+
 func TestReferenceResultJumpKeepsCursorAboveBottomPanel(t *testing.T) {
 	t.Parallel()
 

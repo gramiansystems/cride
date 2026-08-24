@@ -83,6 +83,7 @@ Press `?` (or `F1`, `g?`) inside cride for the categorized, executable command p
 
 | Keys | Action |
 | --- | --- |
+| `J/K, ↓/↑` | Move through the active result panel |
 | `gd` | Go to definition |
 | `gr/gR` | Find references, or references in changed files |
 | `←/→` | Pick the highlighted symbol when a line has several |

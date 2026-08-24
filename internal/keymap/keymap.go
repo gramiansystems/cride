@@ -78,6 +78,7 @@ var Groups = []Group{
 		{"g/", "Search the project"},
 	}},
 	{"Code intelligence", []Binding{
+		{"J/K, ↓/↑", "Move through the active result panel"},
 		{"gd", "Go to definition"},
 		{"gr/gR", "Find references, or references in changed files"},
 		{"←/→", "Pick the highlighted symbol when a line has several"},
