@@ -2,8 +2,46 @@ package annotate
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 )
+
+// ExportName is the agent-facing Markdown review at the repository root.
+const ExportName = "review.md"
+
+// SaveMarkdown writes the canonical Markdown review atomically. Agents may read
+// review.md while cride is still open, so they must never observe a partial
+// rewrite.
+func SaveMarkdown(path string, review Review) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ExportName+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	removeTemp := func() {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+	}
+	if err := tmp.Chmod(0o644); err != nil {
+		removeTemp()
+		return err
+	}
+	if _, err := tmp.Write(ExportMarkdown(review)); err != nil {
+		removeTemp()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	return nil
+}
 
 // ExportMarkdown renders review.md in cr's shape: grouped by file, sorted by
 // line, snippets quoted, general comments in their own trailing section.
@@ -88,4 +126,27 @@ func indentBody(body string) string {
 		lines[i] = "  " + line
 	}
 	return strings.Join(lines, "\n")
+}
+
+// sortComments orders by file, then line, then creation. General comments
+// sort last so saves remain deterministic.
+func sortComments(comments []Comment) {
+	sort.SliceStable(comments, func(i, j int) bool {
+		a, b := comments[i], comments[j]
+		switch {
+		case a.Anchor == nil && b.Anchor == nil:
+			return a.Created.Before(b.Created)
+		case a.Anchor == nil:
+			return false
+		case b.Anchor == nil:
+			return true
+		}
+		if a.Anchor.Path != b.Anchor.Path {
+			return a.Anchor.Path < b.Anchor.Path
+		}
+		if a.Anchor.LineStart != b.Anchor.LineStart {
+			return a.Anchor.LineStart < b.Anchor.LineStart
+		}
+		return a.Created.Before(b.Created)
+	})
 }

@@ -313,7 +313,7 @@ var commandCatalog = []Command{
 	command(commandExpandDirectory, "Expand directory", "l / right", "Expand the selected change-list directory.", reviewOnly(func(c CommandContext) tea.Cmd {
 		return c.Model.expandSelectedDirectory()
 	})),
-	command(commandExportReview, "Export review", "e", "Write the review comments to review.md.", reviewOnly(func(c CommandContext) tea.Cmd {
+	command(commandExportReview, "Save review", "ctrl+s / e", "Save the review comments and refresh review.md without leaving cride.", reviewOnly(func(c CommandContext) tea.Cmd {
 		return c.Model.exportReviewCmd()
 	})),
 	command(commandFindBackward, "Find character backward", "F", "Wait for a character, then find it backward on the line.", func(c CommandContext) tea.Cmd {
@@ -478,8 +478,8 @@ var commandCatalog = []Command{
 	command(commandReferencesChanged, "References: find in changed files", "gR", "Find references limited to changed files.", reviewOnly(func(c CommandContext) tea.Cmd {
 		return c.Model.openReferencesPanel(referenceRequestUsages, true)
 	})),
-	command(commandReload, "Reload review diff", "ctrl+r", "Force a reload of the review diff.", reviewOnly(func(c CommandContext) tea.Cmd {
-		return c.Model.reload(true)
+	command(commandReload, "Reload review", "ctrl+r", "Reload the diff and import comments from review.md.", reviewOnly(func(c CommandContext) tea.Cmd {
+		return tea.Batch(c.Model.reload(true), c.Model.loadReviewCmd())
 	})),
 	command(commandEditRedo, "Redo edit", "ctrl+r", "Redo changes in the edit buffer.", editOnly(func(c CommandContext) tea.Cmd {
 		return c.Model.popEditRedo(commandCount(c))

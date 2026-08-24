@@ -50,9 +50,9 @@ files:
   $XDG_STATE_HOME/cride/<repo-id>/session.json
       per-review session state (cursor, read/unread, view prefs);
       --fresh ignores it
-  .crreview, review.md (repo root)
-      review comments (authoritative JSON) and the exported markdown an
-      agent acts on; add both to .gitignore so they stay out of the diff
+  review.md (repo root)
+      canonical editable review comments for the reviewer and agent;
+      add it to .gitignore so it stays out of the diff
 `, config.Path())
 	}
 	flag.Parse()

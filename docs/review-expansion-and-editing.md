@@ -90,7 +90,7 @@ The agent yields to the reviewer:
   (`{"path", "since"}`), removed on save/discard/quit and cleared at session
   start. Agent instructions should include: *"Before writing a file, check
   `.cride/editing.json` at the repo root; if it names that file, wait until
-  it disappears."* Add `.cride/` to `.gitignore` alongside `.crreview`.
+  it disappears."* Add `.cride/` to `.gitignore` alongside `review.md`.
 - While EDIT/INSERT is active, tree reloads are deferred (the footer shows
   the pending reload) and run when editing ends — an external write can
   never wipe an open buffer.

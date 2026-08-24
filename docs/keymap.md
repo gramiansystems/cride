@@ -45,7 +45,7 @@ Press `?` (or `F1`, `g?`) inside cride for the categorized, executable command p
 | `zO/zC` | Expand or collapse context for all hunks in the file |
 | `tab, zf` | Toggle full-file view |
 | `zs` | Toggle side-by-side diff |
-| `ctrl+r` | Reload the review diff |
+| `ctrl+r` | Reload the diff and import review.md |
 
 ## Editing (vim-style, current-side lines only)
 
@@ -61,14 +61,14 @@ Press `?` (or `F1`, `g?`) inside cride for the categorized, executable command p
 | `u / ctrl+r` | Undo / redo (edit mode) |
 | `ZZ / ZQ` | Save to the working tree / discard, back to review |
 
-## Comments & export
+## Comments & review file
 
 | Keys | Action |
 | --- | --- |
 | `c/C` | Comment on the current line / general comment |
 | `]a/[a` | Next/previous comment |
 | `x` | Toggle a comment resolved |
-| `e` | Export review.md |
+| `ctrl+s / e` | Save review.md without leaving cride |
 
 ## Search & open
 

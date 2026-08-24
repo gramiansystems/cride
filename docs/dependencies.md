@@ -48,8 +48,7 @@ is only a build/development concern when the Go tool downloads modules.
 | `$XDG_STATE_HOME/cride/<repo-id>/session.json` or `~/.local/state/cride/<repo-id>/session.json` | Per-review session state. |
 | `NO_COLOR` | Disables syntax highlighting. |
 | `COLORTERM` | Enables truecolor output when it contains `truecolor` or `24bit`. |
-| `.crreview` | Repository-local authoritative review comment JSON. |
-| `review.md` | Repository-local exported review comments for an agent or reviewer. |
+| `review.md` | Repository-local canonical review, editable by an agent or reviewer. |
 
 ## Direct Go Modules
 

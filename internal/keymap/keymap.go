@@ -52,7 +52,7 @@ var Groups = []Group{
 		{"zO/zC", "Expand or collapse context for all hunks in the file"},
 		{"tab, zf", "Toggle full-file view"},
 		{"zs", "Toggle side-by-side diff"},
-		{"ctrl+r", "Reload the review diff"},
+		{"ctrl+r", "Reload the diff and import review.md"},
 	}},
 	{"Editing (vim-style, current-side lines only)", []Binding{
 		{"i/I/a", "Enter insert mode (before cursor / line start / after cursor)"},
@@ -65,11 +65,11 @@ var Groups = []Group{
 		{"u / ctrl+r", "Undo / redo (edit mode)"},
 		{"ZZ / ZQ", "Save to the working tree / discard, back to review"},
 	}},
-	{"Comments & export", []Binding{
+	{"Comments & review file", []Binding{
 		{"c/C", "Comment on the current line / general comment"},
 		{"]a/[a", "Next/previous comment"},
 		{"x", "Toggle a comment resolved"},
-		{"e", "Export review.md"},
+		{"ctrl+s / e", "Save review.md without leaving cride"},
 	}},
 	{"Search & open", []Binding{
 		{"ctrl+p", "Open a file by fuzzy name"},

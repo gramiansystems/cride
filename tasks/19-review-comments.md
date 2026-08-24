@@ -8,8 +8,9 @@
 
 - `c` creates a line-anchored comment and `C` creates a general comment.
 - Comments carry `nit`, `question`, or `must-fix` severity.
-- Changes write through atomically to the versioned `.crreview` JSON store.
-- `e` exports open comments to `review.md`, grouped by file with snippets.
+- Changes write through atomically to the canonical, editable `review.md`.
+- `ctrl+s`/`e` saves immediately; `ctrl+r` imports Markdown edits and reloads
+  the diff without restarting cride.
 - `]a`/`[a` navigate comments and `x` toggles resolution.
 - Anchors store side and line ranges plus the original snippet.
 - When anchored code drifts, the comment becomes unresolved and is never
@@ -52,12 +53,12 @@ features should not turn cride into a hosted discussion system.
 
 ## Format constraints
 
-- Keep `format_version` at the document root and define migrations before
-  changing required fields.
-- Continue atomic write-through behavior for `.crreview`.
-- Treat `review.md` as a derived export, never the authoritative store.
-- Load unknown optional fields safely and reject unsupported future required
-  formats without destroying data.
+- Keep `review.md` saves atomic and its visible syntax backward-compatible.
+- Treat Markdown reloads as lossy: preserve IDs and timestamps when anchors
+  match, and reject malformed structural headings without replacing in-memory
+  state.
+- Load unknown prose safely and reject unsupported structural headings without
+  destroying data.
 - Preserve comments across file rename when the diff provides a reliable old
   and new path mapping.
 
@@ -69,7 +70,7 @@ features should not turn cride into a hosted discussion system.
 - Deletion and later restoration detach and then heal an anchor.
 - Baseline and current anchors never cross-match.
 - File rename preserves a uniquely matched comment.
-- Older `.crreview` documents load and round-trip without losing fields.
+- A missing `review.md` loads as an empty review without creating a file.
 - Export clearly distinguishes open, resolved, and unresolved comments.
 
 ## Open questions

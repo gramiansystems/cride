@@ -9,7 +9,7 @@ Mostly vibe-coded with Codex and Claude Code. Still in beta.
 
 cride pins a Git baseline, watches the working tree, and keeps an unread queue
 as a person or coding agent changes the code. Review the diff, leave anchored
-comments, export `review.md`, and watch the next revision arrive without
+comments, save or reload `review.md`, and watch the next revision arrive without
 starting over.
 
 ```text
@@ -75,7 +75,7 @@ The core loop is:
 2. Press `R` to mark the current file read and advance, or `A` to mark all
    files read.
 3. Press `c` for a line comment or `C` for a general comment.
-4. Press `e` to export open comments to `review.md`.
+4. Press `ctrl+s` (or `e`) to save the review to `review.md`.
 5. Keep cride open while the code changes; edited files return to the unread
    queue automatically.
 
@@ -89,7 +89,6 @@ Add cride's repository-local files to the reviewed project's `.gitignore`:
 
 ```gitignore
 .cride/
-.crreview
 review.md
 ```
 
@@ -115,7 +114,9 @@ Run `cride --help` for the complete command-line reference.
 | `R` / `U` / `A` | Mark read and advance / unread / all read |
 | `]c` / `[c` | Next / previous hunk |
 | `}` / `{` | Next / previous changed file |
-| `c` / `C` / `e` | Line comment / general comment / export review |
+| `c` / `C` | Line comment / general comment |
+| `ctrl+s` / `e` | Save `review.md` without leaving cride |
+| `ctrl+r` | Reload the diff and import edits from `review.md` |
 | `tab` | Toggle full-file context |
 | `zo` / `zc` / `zs` | Expand / collapse context / toggle side-by-side |
 | `ctrl+p` / `/` / `g/` | Open file / search file / search project |
@@ -161,9 +162,15 @@ highlighting, and truecolor is detected through `COLORTERM`.
 | Path | Purpose |
 | --- | --- |
 | `$XDG_STATE_HOME/cride/<repo-id>/session.json` | Per-review session state |
-| `.crreview` | Authoritative review-comment JSON |
-| `review.md` | Exported review for a person or agent |
+| `review.md` | Canonical editable review for a person or agent |
 | `.cride/editing.json` | Temporary advisory edit lock |
+
+Comment changes update `review.md` directly and `ctrl+s` forces an immediate
+atomic save. You can also edit comment text, headings, severity, status, or
+anchors in the file; `ctrl+r` reloads it, so cride does not need to be restarted
+between review passes. Matching anchors retain their in-memory IDs and
+timestamps. A missing file means an empty review. Malformed comment headings
+are rejected without replacing the review currently in memory.
 
 ## Project documentation
 

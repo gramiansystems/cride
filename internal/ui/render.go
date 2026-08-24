@@ -483,9 +483,9 @@ func emptyReviewLines(live bool, width int) []string {
 		"  n / N  jump between unread files",
 		"  R      mark the current file read and advance",
 		"  c      comment on the current line (C for a general comment)",
-		"  e      export review.md for the agent to act on",
+		"  ^S / e save review.md for the agent to act on",
 		"",
-		"Changes reload automatically; ^R forces a reload.",
+		"Changes reload automatically; ^R reloads the diff and review.md.",
 		"`?` opens the command palette.",
 	}
 	out := make([]string, len(lines))

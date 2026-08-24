@@ -1,13 +1,13 @@
 package app
 
 // Review comments v0 (DESIGN.md's "Review annotations"): compose on a diff row, render
-// inline under the anchor, write through to .crreview, export review.md.
+// inline under the anchor, and persist to the editable review.md.
 // Anchors are plain line ranges; drift marks a comment detached (never
 // discarded) until the v1 fingerprint remap lands.
 
 import (
 	"errors"
-	"os"
+	"io/fs"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -46,46 +46,63 @@ type reviewExportedMsg struct {
 	err  error
 }
 
-func (m Model) reviewPath() string {
+func (m Model) reviewMarkdownPath() string {
 	if m.source == nil {
 		return ""
 	}
-	return annotate.DefaultPath(m.source.Root())
+	return filepath.Join(m.source.Root(), annotate.ExportName)
 }
 
+// loadReviewCmd reads the canonical review.md. A missing file is an empty
+// review; parse and I/O errors leave the current in-memory review untouched.
 func (m Model) loadReviewCmd() tea.Cmd {
-	path := m.reviewPath()
-	if path == "" {
+	markdownPath := m.reviewMarkdownPath()
+	if markdownPath == "" {
 		return nil
 	}
+	existing := m.reviewSnapshot()
 	return func() tea.Msg {
-		review, err := annotate.Load(path)
+		review, err := annotate.LoadMarkdown(markdownPath, existing)
+		if errors.Is(err, fs.ErrNotExist) {
+			return reviewLoadedMsg{review: annotate.Review{
+				Baseline: existing.Baseline,
+				Comments: []annotate.Comment{},
+			}}
+		}
 		return reviewLoadedMsg{review: review, err: err}
 	}
 }
 
-// saveReviewCmd writes through on every change so a crash loses nothing.
-func (m Model) saveReviewCmd() tea.Cmd {
-	path := m.reviewPath()
-	if path == "" {
-		return nil
-	}
+func (m Model) reviewSnapshot() annotate.Review {
 	review := m.review
 	review.Comments = append([]annotate.Comment(nil), m.review.Comments...)
+	if review.Baseline == "" && m.source != nil {
+		review.Baseline = m.source.Baseline()
+	}
+	return review
+}
+
+// saveReviewCmd writes through on every change so a crash loses nothing and
+// review.md stays ready for an agent to consume while cride remains open.
+func (m Model) saveReviewCmd() tea.Cmd {
+	markdownPath := m.reviewMarkdownPath()
+	if markdownPath == "" {
+		return nil
+	}
+	review := m.reviewSnapshot()
 	return func() tea.Msg {
-		return reviewSavedMsg{err: annotate.Save(path, review)}
+		return reviewSavedMsg{err: annotate.SaveMarkdown(markdownPath, review)}
 	}
 }
 
 func (m Model) exportReviewCmd() tea.Cmd {
-	if m.source == nil {
+	path := m.reviewMarkdownPath()
+	if path == "" {
 		return nil
 	}
-	review := m.review
-	review.Comments = append([]annotate.Comment(nil), m.review.Comments...)
-	path := filepath.Join(m.source.Root(), "review.md")
+	review := m.reviewSnapshot()
 	return func() tea.Msg {
-		err := os.WriteFile(path, annotate.ExportMarkdown(review), 0o644)
+		err := annotate.SaveMarkdown(path, review)
 		return reviewExportedMsg{path: path, err: err}
 	}
 }

@@ -162,7 +162,7 @@ func (m Model) contextualHints() []string {
 		}
 		return hints
 	default:
-		return []string{"`j/k`move", "`n/N`unread", "`]c`hunk", "`}`file", "`o`order", "`tab`full"}
+		return []string{"`j/k`move", "`n/N`unread", "`]c`hunk", "`}`file", "`tab`full", "`^S`save review"}
 	}
 }
 

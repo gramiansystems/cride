@@ -7,7 +7,6 @@ coverage.txt
 
 # cride's own review state when developing this repository
 /.cride/
-/.crreview
 /review.md
 
 # Local operating-system metadata

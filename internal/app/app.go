@@ -860,7 +860,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		var toastCmd tea.Cmd
-		if reloadRequested {
+		if reloadRequested && !m.status.sticky {
 			added, removed, changed := diffDelta(m.files, msg.files)
 			toastCmd = m.notify(ui.ToastInfo, reloadToastText(added, removed, changed))
 		}
@@ -890,7 +890,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if (hadNoFiles && !sessionSelected) || pathLost {
 			m.selectFirstDisplayedFile()
 		}
-		if pathLost {
+		if pathLost && !m.status.sticky {
 			toastCmd = m.notify(ui.ToastWarn, "current file left the diff")
 		}
 		cmd := m.ensureCurrentFileContentCmd()
@@ -951,9 +951,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case reviewExportedMsg:
 		if msg.err != nil {
-			return m, m.notify(ui.ToastError, "export failed: "+msg.err.Error())
+			return m, m.notify(ui.ToastError, "review save failed: "+msg.err.Error())
 		}
-		return m, m.notify(ui.ToastInfo, "exported "+msg.path)
+		return m, m.notify(ui.ToastInfo, "saved "+msg.path)
 
 	case sessionLoadedMsg:
 		if msg.err != nil {
@@ -1358,6 +1358,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		"K":         commandHover,
 		"ctrl+o":    commandJumpBack,
 		"ctrl+]":    commandJumpForward,
+		"ctrl+s":    commandExportReview,
 		"ctrl+r":    commandReload,
 		"j":         commandCursorDown,
 		"down":      commandCursorDown,

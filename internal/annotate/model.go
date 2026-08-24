@@ -1,7 +1,6 @@
-// Package annotate holds review comments: the thread model (minus replies),
-// the .crreview store, and the review.md export. See DESIGN.md's "Review
-// annotations" section; the
-// current v0 uses plain line anchors, with fingerprint remapping still planned.
+// Package annotate holds review comments and the canonical review.md format.
+// See DESIGN.md's "Review annotations" section; the current model uses plain
+// line anchors, with fingerprint remapping still planned.
 package annotate
 
 import (
@@ -9,10 +8,6 @@ import (
 	"encoding/hex"
 	"time"
 )
-
-// FormatVersion is written from the first byte so the v1 fingerprint fields
-// can slot in without a format break.
-const FormatVersion = 1
 
 type Severity string
 
@@ -54,30 +49,29 @@ const (
 // Anchor pins a comment to a line range. v0 anchors are plain line ranges;
 // content fingerprints (v1) extend this struct without a format break.
 type Anchor struct {
-	Path      string `json:"path"`
-	Side      Side   `json:"side"`
-	LineStart int    `json:"line_start"`
-	LineEnd   int    `json:"line_end"`
+	Path      string
+	Side      Side
+	LineStart int
+	LineEnd   int
 }
 
 // Comment is one review annotation. A nil Anchor is a general comment.
 type Comment struct {
-	ID       string    `json:"id"`
-	Body     string    `json:"body"`
-	Severity Severity  `json:"severity"`
-	Created  time.Time `json:"created"`
-	Anchor   *Anchor   `json:"anchor,omitempty"`
-	Status   Status    `json:"status"`
+	ID       string
+	Body     string
+	Severity Severity
+	Created  time.Time
+	Anchor   *Anchor
+	Status   Status
 	// Snippet quotes the anchored code at comment time, both for the export
 	// and to detect drift until real fingerprints land.
-	Snippet string `json:"snippet,omitempty"`
+	Snippet string
 }
 
-// Review is the .crreview document.
+// Review is the in-memory representation of review.md.
 type Review struct {
-	FormatVersion int       `json:"format_version"`
-	Baseline      string    `json:"baseline,omitempty"`
-	Comments      []Comment `json:"comments"`
+	Baseline string
+	Comments []Comment
 }
 
 // NewID returns a random comment id.

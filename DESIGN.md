@@ -52,15 +52,16 @@ roadmap item.
 
 ### Review annotations
 
-`internal/annotate` stores comments in `.crreview` and exports open comments to
-`review.md`. A comment can be general or anchored to a baseline/current line
+`internal/annotate` stores comments in the canonical, editable `review.md`.
+Startup and explicit reloads parse Markdown edits; matching anchors preserve
+in-memory comment identity and timestamps, while new Markdown comments receive
+new metadata. A comment can be general or anchored to a baseline/current line
 range. The current implementation stores a code snippet with line coordinates,
 detects anchor drift, and marks detached comments unresolved rather than
 discarding them.
 
-Content-fingerprint re-anchoring and replies remain roadmap work. The JSON
-format starts with a version field so those additions can be introduced
-deliberately.
+Content-fingerprint re-anchoring and replies remain roadmap work. Markdown
+syntax changes should remain backward-compatible with existing review files.
 
 ## Data flow
 
@@ -90,7 +91,7 @@ reloads and file switches preserve a reviewer's source position.
 ```text
 cmd/cride/                    CLI flags and program bootstrap
 internal/
-  annotate/                   comments, .crreview storage, Markdown export
+  annotate/                   comments and Markdown persistence
   app/                        Bubble Tea model, commands, navigation, editing
   config/                     user config parsing and XDG config path
   diff/                       unified-diff model, parser, review index
@@ -192,11 +193,10 @@ Repository-local collaboration files have separate roles:
 
 | Path | Role |
 | --- | --- |
-| `.crreview` | Authoritative, versioned review comments |
-| `review.md` | Human- and agent-readable export |
+| `review.md` | Canonical human- and agent-editable review |
 | `.cride/editing.json` | Temporary advisory editing lock |
 
-Projects reviewed with cride should normally ignore all three.
+Projects reviewed with cride should normally ignore `review.md` and `.cride/`.
 
 ## Invariants for contributors
 

@@ -1,8 +1,11 @@
 package app
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -126,6 +129,183 @@ func TestGeneralCommentHasNoAnchor(t *testing.T) {
 	m = next.(Model)
 	if len(m.review.Comments) != 1 || m.review.Comments[0].Anchor != nil {
 		t.Fatalf("general comment = %+v", m.review.Comments)
+	}
+}
+
+func TestCtrlSSavesCanonicalReviewWithoutQuitting(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	m := commentTestModel()
+	m.source = fakeSource{root: root}
+	m.review.Comments = []annotate.Comment{{
+		ID:       "c1",
+		Body:     "please simplify this",
+		Severity: annotate.SeverityMustFix,
+		Created:  time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC),
+		Status:   annotate.StatusOpen,
+	}}
+
+	next, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlS})
+	m = next.(Model)
+	if cmd == nil {
+		t.Fatal("ctrl+s returned no save command")
+	}
+	if m.mode != modeReview {
+		t.Fatalf("ctrl+s changed mode to %v", m.mode)
+	}
+	next, _ = m.Update(cmd())
+	m = next.(Model)
+	if !strings.Contains(m.status.text, "saved") {
+		t.Fatalf("save toast = %q", m.status.text)
+	}
+
+	markdown, err := os.ReadFile(filepath.Join(root, annotate.ExportName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(markdown), "please simplify this") || !strings.Contains(string(markdown), "Baseline: HEAD") {
+		t.Fatalf("review.md = %q", markdown)
+	}
+}
+
+func TestSavingCommentRefreshesMarkdown(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	m := commentTestModel()
+	m.source = fakeSource{root: root}
+	m.cursor = 2
+	next, _ := m.handleKey(key("c"))
+	m = next.(Model)
+	m = typeComposer(m, "keep the guard clause")
+	next, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlS})
+	m = next.(Model)
+	if cmd == nil {
+		t.Fatal("saving a comment returned no persistence command")
+	}
+	batch, ok := cmd().(tea.BatchMsg)
+	if !ok || len(batch) == 0 {
+		t.Fatal("comment save did not batch persistence")
+	}
+	next, _ = m.Update(batch[0]())
+	m = next.(Model)
+	if m.status.sticky {
+		t.Fatalf("comment save failed: %s", m.status.text)
+	}
+	markdown, err := os.ReadFile(filepath.Join(root, annotate.ExportName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(markdown), "keep the guard clause") {
+		t.Fatalf("review.md was not refreshed: %q", markdown)
+	}
+}
+
+func TestCtrlRLoadsEmptyReviewWhenMarkdownIsMissing(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	m := commentTestModel()
+	m.source = fakeSource{root: root}
+	m.review.Comments = []annotate.Comment{{ID: "stale", Body: "stale"}}
+	next, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlR})
+	m = next.(Model)
+	if cmd == nil {
+		t.Fatal("ctrl+r returned no reload command")
+	}
+	batch, ok := cmd().(tea.BatchMsg)
+	if !ok {
+		t.Fatal("ctrl+r did not batch the diff and comment reloads")
+	}
+	for _, sub := range batch {
+		msg := sub()
+		next, _ = m.Update(msg)
+		m = next.(Model)
+	}
+	if len(m.review.Comments) != 0 {
+		t.Fatalf("missing review.md loaded comments = %+v", m.review.Comments)
+	}
+	if _, err := os.Stat(filepath.Join(root, annotate.ExportName)); !os.IsNotExist(err) {
+		t.Fatalf("reload unexpectedly created a missing review.md: %v", err)
+	}
+}
+
+func TestCtrlRImportsEditedReviewMarkdown(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	created := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
+	existing := annotate.Review{Comments: []annotate.Comment{{
+		ID:       "keep-me",
+		Body:     "original wording",
+		Severity: annotate.SeverityQuestion,
+		Created:  created,
+		Status:   annotate.StatusOpen,
+	}}}
+	markdown := strings.Replace(string(annotate.ExportMarkdown(existing)), "original wording", "edited wording", 1)
+	if err := os.WriteFile(filepath.Join(root, annotate.ExportName), []byte(markdown), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := commentTestModel()
+	m.source = fakeSource{root: root}
+	m.review = existing
+	next, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlR})
+	m = next.(Model)
+	batch, ok := cmd().(tea.BatchMsg)
+	if !ok {
+		t.Fatal("ctrl+r did not batch the diff and review.md reloads")
+	}
+	for _, sub := range batch {
+		msg := sub()
+		next, _ := m.Update(msg)
+		m = next.(Model)
+	}
+	if len(m.review.Comments) != 1 || m.review.Comments[0].Body != "edited wording" {
+		t.Fatalf("imported review = %+v", m.review)
+	}
+	if m.review.Comments[0].ID != "keep-me" || !m.review.Comments[0].Created.Equal(created) {
+		t.Fatalf("import lost comment identity: %+v", m.review.Comments[0])
+	}
+}
+
+func TestMalformedReviewMarkdownDoesNotReplaceCurrentReview(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, annotate.ExportName), []byte("# Review\n\n## a.go\n\n### not an anchor\ntext\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := commentTestModel()
+	m.source = fakeSource{root: root}
+	m.review.Comments = []annotate.Comment{{ID: "current", Body: "keep this", Status: annotate.StatusOpen}}
+	next, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlR})
+	m = next.(Model)
+	batch := cmd().(tea.BatchMsg)
+	var reviewMsg, diffMsg tea.Msg
+	for _, sub := range batch {
+		msg := sub()
+		switch msg.(type) {
+		case reviewLoadedMsg:
+			reviewMsg = msg
+		case diffLoadedMsg:
+			diffMsg = msg
+		}
+	}
+	if reviewMsg == nil || diffMsg == nil {
+		t.Fatal("reload did not produce both review and diff messages")
+	}
+	// Apply the error first to verify the slower diff result cannot hide it.
+	next, _ = m.Update(reviewMsg)
+	m = next.(Model)
+	next, _ = m.Update(diffMsg)
+	m = next.(Model)
+	if len(m.review.Comments) != 1 || m.review.Comments[0].ID != "current" {
+		t.Fatalf("malformed import replaced current review: %+v", m.review.Comments)
+	}
+	if !m.status.sticky || !strings.Contains(m.status.text, "invalid comment heading") {
+		t.Fatalf("malformed import status = %+v", m.status)
 	}
 }
 
