@@ -108,6 +108,7 @@ type Model struct {
 	localExpansions   map[string]map[int]int
 	diffViewOrigins   map[string]diffViewPosition
 	fileViewAnchors   map[string]fileViewAnchor
+	pendingViewJump   viewJumpAnchor
 	contentGeneration int
 	rowsVersion       int
 	wrap              *wrapCacheState
@@ -304,6 +305,15 @@ type fileViewAnchor struct {
 	line      int
 	col       int
 	screenRow int
+}
+
+// viewJumpAnchor makes the first full/compact toggle after a result jump use
+// the jump destination instead of the other view's cursor saved before the
+// jump. Ordinary cursor movement still keeps the two view positions separate.
+type viewJumpAnchor struct {
+	path     string
+	location source.Location
+	pending  bool
 }
 
 type fileContentState struct {
@@ -2541,10 +2551,43 @@ func (m *Model) jumpToReferenceResult(result navsearch.ReferenceResult) tea.Cmd 
 func (m *Model) jumpToLocationSide(loc source.Location, side navsearch.ResultSide) tea.Cmd {
 	if side == navsearch.ResultSideBaseline {
 		if cmd, ok := m.jumpToBaselineLocation(loc); ok {
+			m.rememberViewJump(loc, side)
 			return cmd
 		}
 	}
-	return m.jumpToLocation(loc)
+	cmd := m.jumpToLocation(loc)
+	m.rememberViewJump(loc, navsearch.ResultSideCurrent)
+	return cmd
+}
+
+func (m *Model) rememberViewJump(loc source.Location, side navsearch.ResultSide) {
+	path := m.currentFilePath()
+	if path == "" || loc.Path == "" {
+		m.pendingViewJump = viewJumpAnchor{}
+		return
+	}
+	if loc.Line < 1 {
+		loc.Line = 1
+	}
+	if loc.Column < 1 {
+		loc.Column = 1
+	}
+	m.pendingViewJump = viewJumpAnchor{
+		path:     path,
+		location: loc,
+		pending:  true,
+	}
+	if side == navsearch.ResultSideCurrent {
+		m.pendingViewJump.location.Path = path
+	}
+}
+
+// takeViewJumpAnchor consumes the one-shot cross-view anchor. A toggle on a
+// different file also expires it so a later return cannot revive an old jump.
+func (m *Model) takeViewJumpAnchor(path string) (viewJumpAnchor, bool) {
+	anchor := m.pendingViewJump
+	m.pendingViewJump = viewJumpAnchor{}
+	return anchor, anchor.pending && anchor.path == path
 }
 
 func (m *Model) jumpToBaselineLocation(loc source.Location) (tea.Cmd, bool) {
@@ -3479,12 +3522,18 @@ func (m *Model) switchFileN(dir, count int) {
 func (m *Model) toggleViewMode() {
 	path := m.currentFilePath()
 	if m.viewMode == ViewFile {
+		jumpAnchor, syncJump := m.takeViewJumpAnchor(path)
+		screenRow := m.cursorScreenRow()
 		m.saveCurrentFileState()
 		if m.fileViewAnchors != nil {
 			delete(m.fileViewAnchors, path)
 		}
 		m.viewMode = ViewDiff
 		m.restoreCurrentFileState()
+		if syncJump && m.positionCursorAtLocation(jumpAnchor.location) {
+			m.clampScroll()
+			m.scrollCursorToScreenRowAllowingEOFSpace(screenRow)
+		}
 		m.clampScroll()
 		if path != "" {
 			if m.diffViewOrigins == nil {
@@ -3495,11 +3544,12 @@ func (m *Model) toggleViewMode() {
 		return
 	}
 
+	_, syncJump := m.takeViewJumpAnchor(path)
 	position := m.captureDiffViewPosition()
 	anchor, hasAnchor := m.fileViewAnchorForDiffCursor()
 	_, hasSavedFileView := m.fileStates[fileStateKey{path: path, mode: ViewFile}]
 	origin, hasOrigin := m.diffViewOrigins[path]
-	overrideSaved := !hasSavedFileView || !hasOrigin || !sameDiffViewPosition(position, origin)
+	overrideSaved := syncJump || !hasSavedFileView || !hasOrigin || !sameDiffViewPosition(position, origin)
 
 	m.saveCurrentFileState()
 	m.viewMode = ViewFile

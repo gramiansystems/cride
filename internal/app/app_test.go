@@ -906,6 +906,98 @@ func TestSearchResultJumpLoadsFullFileAndPositionsCursor(t *testing.T) {
 	}
 }
 
+func TestSearchResultJumpReanchorsNextViewToggle(t *testing.T) {
+	t.Parallel()
+
+	m := Model{
+		files:        []diff.FileDiff{viewToggleTestFile("a.go")},
+		selectedFile: 0,
+		cursor:       1, // compact diff source line 10
+		width:        100,
+		height:       24,
+		fileContents: map[string]fileContentState{
+			"a.go": {lines: numberedLines(100), loaded: true},
+		},
+		overlay: overlayState{
+			Kind: OverlaySearch,
+			Results: []navsearch.Result{{
+				Kind:     navsearch.ResultText,
+				Location: source.Location{Path: "a.go", Line: 90, Column: 1},
+			}},
+		},
+	}
+
+	next, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	got := next.(Model)
+	if cmd != nil {
+		t.Fatal("jumping to loaded search result returned unexpected command")
+	}
+	if got.viewMode != ViewFile || cursorSourceLine(got) != 90 {
+		t.Fatalf("search jump = mode %v, source line %d; want full-file line 90", got.viewMode, cursorSourceLine(got))
+	}
+
+	got = press(got, "tab")
+	if got.viewMode != ViewDiff {
+		t.Fatalf("viewMode = %v, want ViewDiff", got.viewMode)
+	}
+	if line := cursorSourceLine(got); line != 90 {
+		t.Fatalf("diff cursor after search jump = source line %d, want 90", line)
+	}
+}
+
+func TestBaselineSearchResultJumpOverridesRememberedFullFileCursor(t *testing.T) {
+	t.Parallel()
+
+	file := viewToggleTestFile("a.go")
+	for i := range file.Hunks {
+		line := file.Hunks[i].NewStart
+		file.Hunks[i].Lines[0].Kind = diff.LineContext
+		file.Hunks[i].Lines[0].OldLine = line
+	}
+	m := Model{
+		files:        []diff.FileDiff{file},
+		selectedFile: 0,
+		cursor:       3, // compact diff source line 90
+		width:        100,
+		height:       24,
+		fileContents: map[string]fileContentState{
+			"a.go": {lines: numberedLines(100), loaded: true},
+		},
+	}
+
+	// Leave full-file view at line 10 while the compact view remembers line 90.
+	m = press(m, "tab")
+	if idx, ok := rowIndexForNewLine(m.currentRows(), 10); ok {
+		m.cursor = idx
+	} else {
+		t.Fatal("full-file row 10 missing")
+	}
+	m = press(m, "tab")
+	m.cursor = 1 // query origin at compact diff line 10
+	m.overlay = overlayState{
+		Kind: OverlaySearch,
+		Results: []navsearch.Result{{
+			Kind:     navsearch.ResultText,
+			Location: source.Location{Path: "a.go", Line: 90, Column: 1},
+			Side:     navsearch.ResultSideBaseline,
+		}},
+	}
+
+	next, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	got := next.(Model)
+	if cmd != nil {
+		t.Fatal("baseline search-result jump returned unexpected command")
+	}
+	if got.viewMode != ViewDiff || cursorSourceLine(got) != 90 {
+		t.Fatalf("baseline search jump = mode %v, source line %d; want compact line 90", got.viewMode, cursorSourceLine(got))
+	}
+
+	got = press(got, "tab")
+	if got.viewMode != ViewFile || cursorSourceLine(got) != 90 {
+		t.Fatalf("expansion after baseline jump = mode %v, source line %d; want full-file line 90", got.viewMode, cursorSourceLine(got))
+	}
+}
+
 func TestGoToDefinitionCommandJumpsToDefinitionResult(t *testing.T) {
 	t.Parallel()
 
