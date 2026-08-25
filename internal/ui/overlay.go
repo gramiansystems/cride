@@ -42,7 +42,7 @@ func RenderOverlay(base string, overlay Overlay, width, height int) string {
 	panelHeight := overlayPanelHeight(overlay, height)
 
 	panel := box(panelWidth, max(1, panelHeight-2), overlayLines(overlay, panelWidth-2, max(1, panelHeight-2)))
-	return placeOverlay(base, panel, width, height)
+	return fitToTerminal(placeOverlay(base, panel, width, height), width, height)
 }
 
 func OverlayResultHeight(overlay Overlay, width, height int) int {

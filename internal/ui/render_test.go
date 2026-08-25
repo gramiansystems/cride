@@ -74,6 +74,55 @@ func TestRenderBrowsingShape(t *testing.T) {
 	}
 }
 
+func TestRenderStaysWithinTerminalBounds(t *testing.T) {
+	t.Parallel()
+
+	files := []diff.FileDiff{{
+		OldPath: "a/really/long/path/to/a/file.go",
+		NewPath: "a/really/long/path/to/a/file.go",
+		Status:  diff.FileModified,
+		Added:   1,
+		Deleted: 1,
+		Hunks: []diff.Hunk{{
+			Header: "@@ -1,2 +1,2 @@",
+			Lines: []diff.Line{
+				{Kind: diff.LineDelete, Content: strings.Repeat("old content ", 20), OldLine: 1},
+				{Kind: diff.LineAdd, Content: strings.Repeat("new content ", 20), NewLine: 1},
+			},
+		}},
+	}}
+	rows := FlattenFile(files, 0)
+	hl := highlight.NewWithOptions(highlight.Options{Disabled: true})
+	panels := []*BottomPanel{
+		nil,
+		{Open: true, Title: "Results", Placement: PanelBottom, Results: []BottomPanelResult{{Label: strings.Repeat("result ", 20)}}},
+		{Open: true, Title: "Results", Placement: PanelRight, Results: []BottomPanelResult{{Label: strings.Repeat("result ", 20)}}},
+	}
+	widths := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 16, 20, 24, 28, 32, 40, 48, 60, 80, 100, 120}
+	heights := []int{1, 2, 3, 4, 5, 8, 12, 20, 24, 40}
+	for _, width := range widths {
+		for _, height := range heights {
+			for _, panel := range panels {
+				out := RenderWithPanel(files, rows, 0, 1, 0, width, height, hl, "HEAD", false, panel)
+				if got := lipgloss.Width(out); got > width {
+					t.Fatalf("rendered width = %d, terminal width = %d (height %d, panel %+v)", got, width, height, panel)
+				}
+				if got := lipgloss.Height(out); got > height {
+					t.Fatalf("rendered height = %d, terminal height = %d (width %d, panel %+v)", got, height, width, panel)
+				}
+				overlay := Overlay{Title: strings.Repeat("Commands ", 10), Prompt: "?", Results: []OverlayResult{{Label: strings.Repeat("result ", 20)}}}
+				out = RenderOverlay(out, overlay, width, height)
+				if got := lipgloss.Width(out); got > width {
+					t.Fatalf("overlay width = %d, terminal width = %d (height %d, panel %+v)", got, width, height, panel)
+				}
+				if got := lipgloss.Height(out); got > height {
+					t.Fatalf("overlay height = %d, terminal height = %d (width %d, panel %+v)", got, height, width, panel)
+				}
+			}
+		}
+	}
+}
+
 func TestRenderShowsStickySymbolBreadcrumb(t *testing.T) {
 	t.Parallel()
 	files := []diff.FileDiff{{

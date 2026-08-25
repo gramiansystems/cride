@@ -320,11 +320,28 @@ func RenderWithOptions(files []diff.FileDiff, rows []Row, selectedFile, cursor, 
 		}
 	}
 	parts = append(parts, footer)
-	out := lipgloss.JoinVertical(lipgloss.Left, parts...)
-	if lipgloss.Height(out) > height {
-		return strings.Join(strings.Split(out, "\n")[:height], "\n")
+	return fitToTerminal(lipgloss.JoinVertical(lipgloss.Left, parts...), width, height)
+}
+
+// fitToTerminal is the final guard against a frame wrapping in the terminal.
+// Most layout code already renders to exact pane dimensions, but very small
+// terminals cannot fit the two bordered panes at their minimum widths. An
+// over-wide frame wraps onto extra physical rows and repeated redraws then
+// look like an endless downward scroll.
+func fitToTerminal(out string, width, height int) string {
+	if width <= 0 || height <= 0 {
+		return ""
 	}
-	return out
+	lines := strings.Split(out, "\n")
+	if len(lines) > height {
+		lines = lines[:height]
+	}
+	for i, line := range lines {
+		if lipgloss.Width(line) > width {
+			lines[i] = truncate.String(line, uint(width))
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func BottomPanelHeight(panel *BottomPanel, totalHeight int) int {
