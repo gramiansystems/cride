@@ -37,6 +37,15 @@ type Watcher interface {
 	Watch(onChange func()) (stop func(), err error)
 }
 
+// TextSearcher is the optional user-facing text-search capability. Unlike
+// Source.Search, whose query is a regular expression used by lexical code
+// intelligence, SearchText treats the query literally and applies smart-case
+// matching (lowercase queries ignore case; uppercase queries match exactly).
+// Sources that do not implement it fall back to an escaped Source.Search.
+type TextSearcher interface {
+	SearchText(query string) ([]search.Result, error)
+}
+
 // Source yields the review diff (baseline → current) for a repository.
 type Source interface {
 	// Diff returns the unified review diff for the whole change.
@@ -55,7 +64,7 @@ type Source interface {
 	// ProjectFiles returns repository-relative files visible on the current side
 	// of the review.
 	ProjectFiles() ([]string, error)
-	// Search returns project text matches for query.
+	// Search returns project text matches for a regular-expression query.
 	Search(query string) ([]search.Result, error)
 	// SearchWord returns project text matches for a whole word.
 	SearchWord(word string) ([]search.Result, error)

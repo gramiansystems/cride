@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"cride/internal/diffsource"
 	"cride/internal/search"
@@ -272,12 +273,25 @@ func (s *Source) ProjectFiles() ([]string, error) {
 	return paths, nil
 }
 
-// Search returns parsed text matches from both sides of the review.
+// Search returns parsed regular-expression matches from both sides of the review.
 func (s *Source) Search(query string) ([]search.Result, error) {
 	if query == "" {
 		return nil, nil
 	}
-	return s.searchBothSides(query, false)
+	return s.searchBothSides(query, searchOptions{})
+}
+
+// SearchText runs a literal, smart-case search across both sides of the
+// review. This is the interactive project-search path; Search remains regex
+// based for definition and other lexical lookups.
+func (s *Source) SearchText(query string) ([]search.Result, error) {
+	if query == "" {
+		return nil, nil
+	}
+	return s.searchBothSides(query, searchOptions{
+		literal:    true,
+		ignoreCase: !strings.ContainsFunc(query, unicode.IsUpper),
+	})
 }
 
 // SearchWord runs whole-word search across both sides of the review.
@@ -285,40 +299,52 @@ func (s *Source) SearchWord(word string) ([]search.Result, error) {
 	if word == "" {
 		return nil, nil
 	}
-	return s.searchBothSides(word, true)
+	return s.searchBothSides(word, searchOptions{word: true})
 }
 
-func (s *Source) searchBothSides(query string, word bool) ([]search.Result, error) {
-	current, err := s.searchCurrent(query, word)
+type searchOptions struct {
+	word       bool
+	literal    bool
+	ignoreCase bool
+}
+
+func (s *Source) searchBothSides(query string, options searchOptions) ([]search.Result, error) {
+	current, err := s.searchCurrent(query, options)
 	if err != nil {
 		return nil, err
 	}
 	if s.baseline == "" || s.baseline == emptyTree {
 		return current, nil
 	}
-	baseline, err := s.gitGrepRef(s.baseline, query, word, search.ResultSideBaseline)
+	baseline, err := s.gitGrepRef(s.baseline, query, options, search.ResultSideBaseline)
 	if err != nil {
 		return nil, err
 	}
 	return mergeSearchResults(current, baseline), nil
 }
 
-func (s *Source) searchCurrent(query string, word bool) ([]search.Result, error) {
+func (s *Source) searchCurrent(query string, options searchOptions) ([]search.Result, error) {
 	if s.head != "" {
-		return s.gitGrepRef(s.head, query, word, search.ResultSideCurrent)
+		return s.gitGrepRef(s.head, query, options, search.ResultSideCurrent)
 	}
-	return s.searchWorktree(query, word)
+	return s.searchWorktree(query, options)
 }
 
-func (s *Source) searchWorktree(query string, word bool) ([]search.Result, error) {
+func (s *Source) searchWorktree(query string, options searchOptions) ([]search.Result, error) {
 	rg, err := exec.LookPath("rg")
 	if err != nil {
-		return s.gitGrepWorktree(query, word)
+		return s.gitGrepWorktree(query, options)
 	}
 
 	args := []string{"--line-number", "--column", "--no-heading", "--color", "never"}
-	if word {
+	if options.word {
 		args = append(args, "--word-regexp")
+	}
+	if options.literal {
+		args = append(args, "--fixed-strings")
+	}
+	if options.ignoreCase {
+		args = append(args, "--ignore-case")
 	}
 	args = append(args, "--", query, s.git.root)
 	cmd := exec.Command(rg, args...)
@@ -348,10 +374,18 @@ func (s *Source) searchWorktree(query string, word bool) ([]search.Result, error
 	return results, nil
 }
 
-func (s *Source) gitGrepWorktree(query string, word bool) ([]search.Result, error) {
-	args := []string{"grep", "--line-number", "--column", "--no-color", "-I", "-E", "--untracked"}
-	if word {
+func (s *Source) gitGrepWorktree(query string, options searchOptions) ([]search.Result, error) {
+	args := []string{"grep", "--line-number", "--column", "--no-color", "-I", "--untracked"}
+	if options.literal {
+		args = append(args, "--fixed-strings")
+	} else {
+		args = append(args, "--extended-regexp")
+	}
+	if options.word {
 		args = append(args, "--word-regexp")
+	}
+	if options.ignoreCase {
+		args = append(args, "--ignore-case")
 	}
 	args = append(args, "-e", query, "--")
 	out, code, err := s.git.runCode(args...)
@@ -371,13 +405,21 @@ func (s *Source) gitGrepWorktree(query string, word bool) ([]search.Result, erro
 	return results, nil
 }
 
-func (s *Source) gitGrepRef(ref, query string, word bool, side search.ResultSide) ([]search.Result, error) {
+func (s *Source) gitGrepRef(ref, query string, options searchOptions, side search.ResultSide) ([]search.Result, error) {
 	if ref == "" || ref == emptyTree {
 		return nil, nil
 	}
-	args := []string{"grep", "--line-number", "--column", "--no-color", "-I", "-E"}
-	if word {
+	args := []string{"grep", "--line-number", "--column", "--no-color", "-I"}
+	if options.literal {
+		args = append(args, "--fixed-strings")
+	} else {
+		args = append(args, "--extended-regexp")
+	}
+	if options.word {
 		args = append(args, "--word-regexp")
+	}
+	if options.ignoreCase {
+		args = append(args, "--ignore-case")
 	}
 	args = append(args, "-e", query, ref, "--")
 	out, code, err := s.git.runCode(args...)

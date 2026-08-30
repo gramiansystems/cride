@@ -6,6 +6,7 @@ package app
 
 import (
 	"errors"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -120,6 +121,7 @@ type Model struct {
 
 	overlay          overlayState
 	searchGeneration int
+	projectSearch    projectSearchMemo
 
 	referencePanel      referencePanelState
 	referenceGeneration int
@@ -231,6 +233,16 @@ type overlayState struct {
 	SymbolQueries           []navsearch.SymbolQuery
 	PendingReferenceKind    referenceRequestKind
 	PendingReferenceChanged bool
+	SearchRegex             bool
+	QuerySelected           bool
+}
+
+type projectSearchMemo struct {
+	Query  string
+	Cursor int
+	Top    int
+	Order  diff.ResultOrder
+	Regex  bool
 }
 
 type referencePanelState struct {
@@ -405,11 +417,13 @@ type projectFilesLoadedMsg struct {
 type searchDebounceMsg struct {
 	generation int
 	query      string
+	regex      bool
 }
 
 type searchLoadedMsg struct {
 	generation int
 	query      string
+	regex      bool
 	results    []navsearch.Result
 	err        error
 }
@@ -516,19 +530,27 @@ func (m *Model) loadProjectFilesCmd() tea.Cmd {
 	}
 }
 
-func debounceSearchCmd(generation int, query string) tea.Cmd {
+func debounceSearchCmd(generation int, query string, regex bool) tea.Cmd {
 	return tea.Tick(searchDebounceDelay, func(time.Time) tea.Msg {
-		return searchDebounceMsg{generation: generation, query: query}
+		return searchDebounceMsg{generation: generation, query: query, regex: regex}
 	})
 }
 
-func searchCmd(src diffsource.Source, generation int, query string) tea.Cmd {
+func searchCmd(src diffsource.Source, generation int, query string, regex bool) tea.Cmd {
 	if src == nil {
 		return nil
 	}
 	return func() tea.Msg {
-		results, err := src.Search(query)
-		return searchLoadedMsg{generation: generation, query: query, results: results, err: err}
+		var results []navsearch.Result
+		var err error
+		if regex {
+			results, err = src.Search(query)
+		} else if textSearcher, ok := src.(diffsource.TextSearcher); ok {
+			results, err = textSearcher.SearchText(query)
+		} else {
+			results, err = src.Search(regexp.QuoteMeta(query))
+		}
+		return searchLoadedMsg{generation: generation, query: query, regex: regex, results: results, err: err}
 	}
 }
 
@@ -1121,13 +1143,13 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case searchDebounceMsg:
-		if m.overlay.Kind != OverlaySearch || msg.generation != m.overlay.Generation || msg.query != m.overlay.Query {
+		if m.overlay.Kind != OverlaySearch || msg.generation != m.overlay.Generation || msg.query != m.overlay.Query || msg.regex != m.overlay.SearchRegex {
 			return m, nil
 		}
-		return m, searchCmd(m.source, msg.generation, msg.query)
+		return m, searchCmd(m.source, msg.generation, msg.query, msg.regex)
 
 	case searchLoadedMsg:
-		if m.overlay.Kind != OverlaySearch || msg.generation != m.overlay.Generation || msg.query != m.overlay.Query {
+		if m.overlay.Kind != OverlaySearch || msg.generation != m.overlay.Generation || msg.query != m.overlay.Query || msg.regex != m.overlay.SearchRegex {
 			return m, nil
 		}
 		m.overlay.Loading = false
@@ -1887,12 +1909,21 @@ func (m Model) handleOverlayKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.closeOverlay()
 		return m, nil
 	case "enter":
+		if m.overlay.Kind == OverlaySearch && m.overlay.Query != "" && m.overlay.Loading && len(m.overlay.Results) == 0 {
+			return m, m.runProjectSearchNow()
+		}
 		cmd := m.acceptOverlayResult()
 		return m, cmd
 	case "up", "ctrl+p":
 		m.moveOverlayCursor(-1)
 		return m, nil
 	case "down", "ctrl+n":
+		m.moveOverlayCursor(1)
+		return m, nil
+	case "shift+tab":
+		m.moveOverlayCursor(-1)
+		return m, nil
+	case "tab":
 		m.moveOverlayCursor(1)
 		return m, nil
 	case "pgup":
@@ -1902,13 +1933,31 @@ func (m Model) handleOverlayKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.pageOverlayCursor(1)
 		return m, nil
 	case "backspace":
+		if m.overlay.QuerySelected {
+			return m.updateOverlayQuery("")
+		}
 		return m.updateOverlayQuery(dropLastRune(m.overlay.Query))
+	case "ctrl+u":
+		return m.updateOverlayQuery("")
+	case "ctrl+w":
+		if m.overlay.QuerySelected {
+			return m.updateOverlayQuery("")
+		}
+		return m.updateOverlayQuery(dropLastWord(m.overlay.Query))
 	case "ctrl+o":
 		m.toggleOverlayOrder()
+		return m, nil
+	case "ctrl+r":
+		if m.overlay.Kind == OverlaySearch {
+			return m, m.toggleProjectSearchRegex()
+		}
 		return m, nil
 	}
 
 	if msg.Type == tea.KeyRunes {
+		if m.overlay.QuerySelected {
+			return m.updateOverlayQuery(string(msg.Runes))
+		}
 		return m.updateOverlayQuery(m.overlay.Query + string(msg.Runes))
 	}
 	return m, nil
@@ -1955,11 +2004,26 @@ func (m *Model) openFileOverlay() {
 	m.refreshFileOpenResults()
 }
 
-func (m *Model) openSearchOverlay() {
+func (m *Model) openSearchOverlay() tea.Cmd {
 	m.countBuf = ""
 	m.pendingG = false
 	m.searchGeneration++
-	m.overlay = overlayState{Kind: OverlaySearch, Generation: m.searchGeneration, Order: diff.ResultOrderReview}
+	memo := m.projectSearch
+	m.overlay = overlayState{
+		Kind:          OverlaySearch,
+		Query:         memo.Query,
+		Cursor:        memo.Cursor,
+		Top:           memo.Top,
+		Generation:    m.searchGeneration,
+		Order:         memo.Order,
+		SearchRegex:   memo.Regex,
+		QuerySelected: memo.Query != "",
+	}
+	if memo.Query == "" {
+		return nil
+	}
+	m.overlay.Loading = true
+	return searchCmd(m.source, m.overlay.Generation, memo.Query, memo.Regex)
 }
 
 func (m *Model) openWorkspaceSymbolOverlay() {
@@ -2149,11 +2213,21 @@ func (m *Model) openCallHierarchyPanel(kind enrichmentPanelKind) tea.Cmd {
 }
 
 func (m *Model) closeOverlay() {
+	if m.overlay.Kind == OverlaySearch {
+		m.projectSearch = projectSearchMemo{
+			Query:  m.overlay.Query,
+			Cursor: m.overlay.Cursor,
+			Top:    m.overlay.Top,
+			Order:  m.overlay.Order,
+			Regex:  m.overlay.SearchRegex,
+		}
+	}
 	m.overlay = overlayState{}
 }
 
 func (m Model) updateOverlayQuery(query string) (tea.Model, tea.Cmd) {
 	m.overlay.Query = query
+	m.overlay.QuerySelected = false
 	m.overlay.Cursor = 0
 	m.overlay.Top = 0
 	m.overlay.Err = nil
@@ -2173,7 +2247,7 @@ func (m Model) updateOverlayQuery(query string) (tea.Model, tea.Cmd) {
 		m.overlay.Loading = true
 		m.overlay.Results = nil
 		m.overlay.RawResults = nil
-		return m, debounceSearchCmd(m.overlay.Generation, query)
+		return m, debounceSearchCmd(m.overlay.Generation, query, m.overlay.SearchRegex)
 	case OverlayWorkspaceSymbol:
 		m.searchGeneration++
 		m.overlay.Generation = m.searchGeneration
@@ -2195,6 +2269,31 @@ func (m Model) updateOverlayQuery(query string) (tea.Model, tea.Cmd) {
 	default:
 		return m, nil
 	}
+}
+
+func (m *Model) runProjectSearchNow() tea.Cmd {
+	if m.overlay.Kind != OverlaySearch || m.overlay.Query == "" {
+		return nil
+	}
+	m.searchGeneration++
+	m.overlay.Generation = m.searchGeneration
+	m.overlay.Loading = true
+	m.overlay.Err = nil
+	m.overlay.Results = nil
+	m.overlay.RawResults = nil
+	return searchCmd(m.source, m.overlay.Generation, m.overlay.Query, m.overlay.SearchRegex)
+}
+
+func (m *Model) toggleProjectSearchRegex() tea.Cmd {
+	if m.overlay.Kind != OverlaySearch {
+		return nil
+	}
+	m.overlay.SearchRegex = !m.overlay.SearchRegex
+	if m.overlay.Query == "" {
+		m.overlay.Err = nil
+		return nil
+	}
+	return m.runProjectSearchNow()
 }
 
 func (m *Model) refreshFileOpenResults() {
@@ -2738,12 +2837,31 @@ func dropLastRune(s string) string {
 	return string(rs[:len(rs)-1])
 }
 
+// dropLastWord mirrors the terminal input convention used by shells: remove
+// trailing whitespace, then the preceding run of non-whitespace characters.
+func dropLastWord(s string) string {
+	rs := []rune(s)
+	i := len(rs)
+	for i > 0 && isQuerySpace(rs[i-1]) {
+		i--
+	}
+	for i > 0 && !isQuerySpace(rs[i-1]) {
+		i--
+	}
+	return string(rs[:i])
+}
+
+func isQuerySpace(r rune) bool {
+	return r == ' ' || r == '\t' || r == '\n' || r == '\r'
+}
+
 func (m Model) overlayView() ui.Overlay {
 	overlay := ui.Overlay{
-		Query:   m.overlay.Query,
-		Cursor:  m.overlay.Cursor,
-		Top:     m.overlay.Top,
-		Loading: m.overlay.Loading,
+		Query:         m.overlay.Query,
+		Cursor:        m.overlay.Cursor,
+		Top:           m.overlay.Top,
+		Loading:       m.overlay.Loading,
+		QuerySelected: m.overlay.QuerySelected,
 	}
 	switch m.overlay.Kind {
 	case OverlayFileOpen:
@@ -2754,6 +2872,14 @@ func (m Model) overlayView() ui.Overlay {
 		overlay.Title = "Search project"
 		overlay.Prompt = "g/"
 		overlay.Empty = "No matches"
+		mode := "literal"
+		if m.overlay.SearchRegex {
+			mode = "regex"
+		} else {
+			overlay.Match = m.overlay.Query
+			overlay.MatchFold = smartCaseFold(m.overlay.Query)
+		}
+		overlay.Title += " · " + mode + " · " + m.overlay.Order.String() + " · ^R mode · ^O order"
 	case OverlayWorkspaceSymbol:
 		overlay.Title = "Workspace symbols"
 		overlay.Prompt = "gS"
@@ -2771,7 +2897,7 @@ func (m Model) overlayView() ui.Overlay {
 			}
 		}
 	}
-	if m.overlay.Kind == OverlaySearch || m.overlay.Kind == OverlayWorkspaceSymbol {
+	if m.overlay.Kind == OverlayWorkspaceSymbol {
 		overlay.Title += " · " + m.overlay.Order.String() + " · ^O toggle"
 	}
 	if m.overlay.Err != nil {

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/reflow/truncate"
@@ -1057,6 +1058,10 @@ func padRight(s string, w int) string {
 }
 
 func resultLine(label, preview string, width int, tone ResultTone, labelWidth int, changeField bool) string {
+	return resultLineWithMatch(label, preview, width, tone, labelWidth, changeField, "", false)
+}
+
+func resultLineWithMatch(label, preview string, width int, tone ResultTone, labelWidth int, changeField bool, match string, fold bool) string {
 	out := styleLeadingResultMarkers(label)
 	if labelWidth > 0 {
 		out = padRight(out, labelWidth)
@@ -1067,9 +1072,53 @@ func resultLine(label, preview string, width int, tone ResultTone, labelWidth in
 		out = sign + " " + out
 	}
 	if preview != "" {
-		out += dimStyle.Render("  " + strings.TrimSpace(preview))
+		out += dimStyle.Render("  ") + renderResultPreview(strings.TrimSpace(preview), match, fold)
 	}
 	return truncate.String(out, uint(max(1, width)))
+}
+
+func renderResultPreview(preview, match string, fold bool) string {
+	if match == "" {
+		return dimStyle.Render(preview)
+	}
+	textRunes := []rune(preview)
+	matchRunes := []rune(match)
+	if len(matchRunes) == 0 || len(matchRunes) > len(textRunes) {
+		return dimStyle.Render(preview)
+	}
+	var out strings.Builder
+	start := 0
+	for i := 0; i+len(matchRunes) <= len(textRunes); {
+		if !resultRunesMatchAt(textRunes, i, matchRunes, fold) {
+			i++
+			continue
+		}
+		out.WriteString(dimStyle.Render(string(textRunes[start:i])))
+		out.WriteString(searchMatchBgSeq)
+		out.WriteString(string(textRunes[i : i+len(matchRunes)]))
+		out.WriteString("\x1b[0m")
+		i += len(matchRunes)
+		start = i
+	}
+	if start == 0 {
+		return dimStyle.Render(preview)
+	}
+	out.WriteString(dimStyle.Render(string(textRunes[start:])))
+	return out.String()
+}
+
+func resultRunesMatchAt(text []rune, start int, match []rune, fold bool) bool {
+	for i, want := range match {
+		got := text[start+i]
+		if fold {
+			got = unicode.ToLower(got)
+			want = unicode.ToLower(want)
+		}
+		if got != want {
+			return false
+		}
+	}
+	return true
 }
 
 func resultToneChangeField(tone ResultTone) string {

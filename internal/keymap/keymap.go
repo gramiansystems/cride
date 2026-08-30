@@ -74,8 +74,9 @@ var Groups = []Group{
 	}},
 	{"Search & open", []Binding{
 		{"ctrl+p", "Open a file by fuzzy name"},
-		{"/", "Search within the current file (n/N step, esc clears)"},
-		{"g/", "Search the project"},
+		{"/", "Search within the current file (n/N step; ctrl+w/ctrl+u edit; esc clears)"},
+		{"g/", "Search the project (literal smart-case by default; ctrl+r toggles regex)"},
+		{"tab/shift+tab, ctrl+n/ctrl+p", "Move through project-search results"},
 	}},
 	{"Code intelligence", []Binding{
 		{"J/K, ↓/↑", "Move through the active result panel"},

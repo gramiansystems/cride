@@ -64,6 +64,22 @@ func TestInFileSearchIncrementalNarrowingAndWidening(t *testing.T) {
 	}
 }
 
+func TestInFileSearchQueryEditingShortcuts(t *testing.T) {
+	t.Parallel()
+
+	m := Model{files: []diff.FileDiff{searchTestFile("a.go")}, width: 90, height: 20}
+	m = press(m, "/")
+	m = typeString(m, "alpha one")
+	m = press(m, "ctrl+w")
+	if m.search.query != "alpha " || len(m.search.matches) != 2 {
+		t.Fatalf("after ctrl+w query/matches = %q/%d, want %q/2", m.search.query, len(m.search.matches), "alpha ")
+	}
+	m = press(m, "ctrl+u")
+	if m.search.query != "" || len(m.search.matches) != 0 {
+		t.Fatalf("after ctrl+u query/matches = %q/%d, want empty/0", m.search.query, len(m.search.matches))
+	}
+}
+
 func TestInFileSearchSmartCase(t *testing.T) {
 	t.Parallel()
 

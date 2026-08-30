@@ -119,7 +119,7 @@ Run `cride --help` for the complete command-line reference.
 | `ctrl+r` | Reload the diff and import edits from `review.md` |
 | `tab` | Toggle full-file context |
 | `zo` / `zc` / `zs` | Expand / collapse context / toggle side-by-side |
-| `ctrl+p` / `/` / `g/` | Open file / search file / search project |
+| `ctrl+p` / `/` / `g/` | Open file / search file / search project (literal smart-case; `ctrl+r` regex) |
 | `gd` / `gr` / `gy` | Definition / references / changed symbols |
 | `?` | Open the categorized command palette |
 

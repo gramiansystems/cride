@@ -85,6 +85,14 @@ func (m Model) handleSearchTypingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.search.query = dropLastRune(m.search.query)
 		m.refreshSearchMatches(true)
 		return m, nil
+	case "ctrl+u":
+		m.search.query = ""
+		m.refreshSearchMatches(true)
+		return m, nil
+	case "ctrl+w":
+		m.search.query = dropLastWord(m.search.query)
+		m.refreshSearchMatches(true)
+		return m, nil
 	}
 	if msg.Type == tea.KeyRunes {
 		m.search.query += string(msg.Runes)
@@ -228,7 +236,7 @@ func computeMatches(rows []ui.Row, query string) []matchSpan {
 	if query == "" {
 		return nil
 	}
-	fold := !strings.ContainsFunc(query, unicode.IsUpper)
+	fold := smartCaseFold(query)
 	queryRunes := []rune(query)
 	if fold {
 		for i, r := range queryRunes {
@@ -255,6 +263,10 @@ func computeMatches(rows []ui.Row, query string) []matchSpan {
 		}
 	}
 	return matches
+}
+
+func smartCaseFold(query string) bool {
+	return !strings.ContainsFunc(query, unicode.IsUpper)
 }
 
 func appendContentMatches(matches []matchSpan, rowIdx int, content string, side ui.MatchSpanSide, queryRunes []rune, fold bool) []matchSpan {

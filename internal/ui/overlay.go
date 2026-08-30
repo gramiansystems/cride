@@ -8,19 +8,22 @@ import (
 )
 
 type Overlay struct {
-	Title      string
-	Prompt     string
-	Query      string
-	Tabs       []string
-	ActiveTab  int
-	Cursor     int
-	Top        int
-	Results    []OverlayResult
-	LabelWidth int
-	FullHeight bool
-	Loading    bool
-	Error      string
-	Empty      string
+	Title         string
+	Prompt        string
+	Query         string
+	Tabs          []string
+	ActiveTab     int
+	Cursor        int
+	Top           int
+	Results       []OverlayResult
+	LabelWidth    int
+	FullHeight    bool
+	Loading       bool
+	Error         string
+	Empty         string
+	Match         string
+	MatchFold     bool
+	QuerySelected bool
 }
 
 type OverlayResult struct {
@@ -70,7 +73,11 @@ func overlayLines(overlay Overlay, width, height int) []string {
 	if len(overlay.Tabs) > 0 {
 		lines = append(lines, overlayTabLine(overlay, width))
 	}
-	lines = append(lines, padRight(overlay.Prompt+" "+overlay.Query, width))
+	query := overlay.Query
+	if overlay.QuerySelected && query != "" {
+		query = selectedFileStyle.Render(query)
+	}
+	lines = append(lines, padRight(overlay.Prompt+" "+query+"▌", width))
 
 	status := overlayStatus(overlay)
 	if status != "" {
@@ -80,7 +87,7 @@ func overlayLines(overlay Overlay, width, height int) []string {
 	available := max(0, height-len(lines))
 	start := min(max(overlay.Top, 0), max(0, len(overlay.Results)-available))
 	for i := start; i < len(overlay.Results) && i < start+available; i++ {
-		line := overlayResultLineWithLabelWidth(overlay.Results[i], width, overlay.LabelWidth)
+		line := overlayResultLineWithLabelWidthAndMatch(overlay.Results[i], width, overlay.LabelWidth, overlay.Match, overlay.MatchFold)
 		line = renderResultRow(line, width, i == overlay.Cursor, overlay.Results[i].Tone)
 		lines = append(lines, line)
 	}
@@ -130,7 +137,11 @@ func overlayResultLine(result OverlayResult, width int) string {
 }
 
 func overlayResultLineWithLabelWidth(result OverlayResult, width, labelWidth int) string {
-	return resultLine(result.Label, result.Preview, width, result.Tone, labelWidth, result.ChangeField)
+	return overlayResultLineWithLabelWidthAndMatch(result, width, labelWidth, "", false)
+}
+
+func overlayResultLineWithLabelWidthAndMatch(result OverlayResult, width, labelWidth int, match string, fold bool) string {
+	return resultLineWithMatch(result.Label, result.Preview, width, result.Tone, labelWidth, result.ChangeField, match, fold)
 }
 
 // OverlayResultIndexAt maps a screen click to an overlay result index,

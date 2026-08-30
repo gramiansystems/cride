@@ -462,8 +462,7 @@ var commandCatalog = []Command{
 		return c.Model.stepUnreadFile(-1, commandCount(c))
 	})),
 	command(commandProjectSearch, "Project search", "g/", "Search text across the project.", reviewOnly(func(c CommandContext) tea.Cmd {
-		c.Model.openSearchOverlay()
-		return nil
+		return c.Model.openSearchOverlay()
 	})),
 	command(commandQuit, "Quit", "q / ctrl+c", "Save the session and quit cride.", func(c CommandContext) tea.Cmd {
 		if c.Model.mode != modeReview {

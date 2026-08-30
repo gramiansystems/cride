@@ -1770,6 +1770,108 @@ func TestSearchCommandErrorRendersWithoutCrash(t *testing.T) {
 	}
 }
 
+func TestProjectSearchUsesLiteralModeAndExplicitRegexMode(t *testing.T) {
+	t.Parallel()
+
+	var literalQueries, regexQueries []string
+	src := fakeSource{
+		textSearchQueries: &literalQueries,
+		searchQueries:     &regexQueries,
+	}
+
+	literalMsg := searchCmd(src, 1, "[target]", false)().(searchLoadedMsg)
+	if literalMsg.err != nil || len(literalQueries) != 1 || literalQueries[0] != "[target]" || len(regexQueries) != 0 {
+		t.Fatalf("literal search calls = text %v regex %v err %v", literalQueries, regexQueries, literalMsg.err)
+	}
+
+	regexMsg := searchCmd(src, 2, "[target]", true)().(searchLoadedMsg)
+	if regexMsg.err != nil || len(regexQueries) != 1 || regexQueries[0] != "[target]" {
+		t.Fatalf("regex search calls = %v err %v", regexQueries, regexMsg.err)
+	}
+}
+
+func TestProjectSearchRecallEditingAndTabNavigation(t *testing.T) {
+	t.Parallel()
+
+	results := numberedResults(3)
+	m := Model{
+		source: fakeSource{searchResults: results},
+		width:  90,
+		height: 20,
+		overlay: overlayState{
+			Kind:        OverlaySearch,
+			Query:       "one two",
+			Cursor:      1,
+			Top:         1,
+			Results:     results,
+			RawResults:  results,
+			Order:       diff.ResultOrderSource,
+			SearchRegex: true,
+		},
+	}
+	m.closeOverlay()
+
+	cmd := m.openSearchOverlay()
+	if cmd == nil {
+		t.Fatal("reopening a remembered search returned no search command")
+	}
+	if m.overlay.Query != "one two" || m.overlay.Cursor != 1 || m.overlay.Order != diff.ResultOrderSource || !m.overlay.SearchRegex || !m.overlay.QuerySelected {
+		t.Fatalf("recalled overlay = %+v", m.overlay)
+	}
+	next, _ := m.Update(cmd())
+	m = next.(Model)
+	if m.overlay.Cursor != 1 || len(m.overlay.Results) != 3 {
+		t.Fatalf("loaded recalled results cursor/count = %d/%d, want 1/3", m.overlay.Cursor, len(m.overlay.Results))
+	}
+
+	m = press(m, "fresh words")
+	if m.overlay.Query != "fresh words" || m.overlay.QuerySelected {
+		t.Fatalf("typing over recalled query = %q selected=%v, want replacement", m.overlay.Query, m.overlay.QuerySelected)
+	}
+	m = press(m, "ctrl+w")
+	if m.overlay.Query != "fresh " {
+		t.Fatalf("query after ctrl+w = %q, want %q", m.overlay.Query, "fresh ")
+	}
+	m = press(m, "ctrl+u")
+	if m.overlay.Query != "" {
+		t.Fatalf("query after ctrl+u = %q, want empty", m.overlay.Query)
+	}
+	m.overlay.Results = results
+	m = press(m, "tab")
+	if m.overlay.Cursor != 1 {
+		t.Fatalf("cursor after tab = %d, want 1", m.overlay.Cursor)
+	}
+	m = press(m, "shift+tab")
+	if m.overlay.Cursor != 0 {
+		t.Fatalf("cursor after shift+tab = %d, want 0", m.overlay.Cursor)
+	}
+}
+
+func TestProjectSearchRegexToggleRunsImmediately(t *testing.T) {
+	t.Parallel()
+
+	var regexQueries []string
+	m := Model{
+		source: fakeSource{searchQueries: &regexQueries},
+		overlay: overlayState{
+			Kind:       OverlaySearch,
+			Query:      "[target]",
+			Generation: 1,
+		},
+	}
+
+	next, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlR})
+	got := next.(Model)
+	if cmd == nil || !got.overlay.SearchRegex || !got.overlay.Loading {
+		t.Fatalf("regex toggle state = %+v, cmd nil = %v", got.overlay, cmd == nil)
+	}
+	next, _ = got.Update(cmd())
+	got = next.(Model)
+	if got.overlay.Loading || len(regexQueries) != 1 || regexQueries[0] != "[target]" {
+		t.Fatalf("regex search calls/loading = %v/%v", regexQueries, got.overlay.Loading)
+	}
+}
+
 func TestOverlayPagingScrollsByVisiblePage(t *testing.T) {
 	t.Parallel()
 
@@ -2401,6 +2503,8 @@ type fakeSource struct {
 	searchResultsByWord map[string][]navsearch.Result
 	searchErr           error
 	searchWords         *[]string
+	searchQueries       *[]string
+	textSearchQueries   *[]string
 	root                string
 }
 
@@ -2438,6 +2542,16 @@ func (s fakeSource) ChangedPaths() ([]string, error) { return nil, nil }
 func (s fakeSource) ProjectFiles() ([]string, error) { return s.projectFiles, nil }
 
 func (s fakeSource) Search(query string) ([]navsearch.Result, error) {
+	if s.searchQueries != nil {
+		*s.searchQueries = append(*s.searchQueries, query)
+	}
+	return s.searchResults, s.searchErr
+}
+
+func (s fakeSource) SearchText(query string) ([]navsearch.Result, error) {
+	if s.textSearchQueries != nil {
+		*s.textSearchQueries = append(*s.textSearchQueries, query)
+	}
 	return s.searchResults, s.searchErr
 }
 

@@ -265,6 +265,34 @@ func TestOverlayLinesRenderScrolledWindow(t *testing.T) {
 	}
 }
 
+func TestProjectSearchOverlayShowsInputCursorAndHighlightsLiteralMatches(t *testing.T) {
+	t.Parallel()
+
+	lines := overlayLines(Overlay{
+		Title:     "Search project",
+		Prompt:    "g/",
+		Query:     "needle",
+		Cursor:    -1,
+		Match:     "needle",
+		MatchFold: true,
+		Results: []OverlayResult{{
+			Label:   "a.go:2:1",
+			Preview: "Needle plus needle",
+		}},
+	}, 60, 4)
+	rendered := strings.Join(lines, "\n")
+	plain := stripANSI(rendered)
+	if !strings.Contains(plain, "g/ needle▌") {
+		t.Fatalf("search prompt missing input cursor:\n%s", plain)
+	}
+	if strings.Count(rendered, searchMatchBgSeq) != 2 {
+		t.Fatalf("highlight count = %d, want 2:\n%q", strings.Count(rendered, searchMatchBgSeq), rendered)
+	}
+	if !strings.Contains(plain, "Needle plus needle") {
+		t.Fatalf("highlighting changed preview text:\n%s", plain)
+	}
+}
+
 func TestOverlayLinesCanAlignPreviewColumn(t *testing.T) {
 	t.Parallel()
 

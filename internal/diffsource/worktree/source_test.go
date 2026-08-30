@@ -399,6 +399,44 @@ func TestWorkingTreeSearchWordUsesWholeWordMatches(t *testing.T) {
 	}
 }
 
+func TestWorkingTreeTextSearchIsLiteralAndSmartCase(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir, gitRun, _ := newTestGitRepo(t)
+	gitRun("init", "-q")
+	writeFile(t, dir, "a.txt", "alpha\nAlpha\n[a-z]\na\n")
+
+	src, err := Open(dir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	folded, err := src.SearchText("alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(folded) != 2 {
+		t.Fatalf("lowercase SearchText results = %d, want 2: %+v", len(folded), folded)
+	}
+
+	exact, err := src.SearchText("Alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(exact) != 1 || exact[0].Location.Line != 2 {
+		t.Fatalf("uppercase SearchText results = %+v, want exact line 2", exact)
+	}
+
+	literal, err := src.SearchText("[a-z]")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(literal) != 1 || literal[0].Location.Line != 3 {
+		t.Fatalf("punctuation SearchText results = %+v, want literal line 3", literal)
+	}
+}
+
 func TestWorkingTreeSearchFallsBackToGitWithoutRipgrep(t *testing.T) {
 	gitPath, err := exec.LookPath("git")
 	if err != nil {
@@ -406,7 +444,7 @@ func TestWorkingTreeSearchFallsBackToGitWithoutRipgrep(t *testing.T) {
 	}
 	dir, gitRun, _ := newTestGitRepo(t)
 	gitRun("init", "-q")
-	writeFile(t, dir, "tracked.go", "Targeted()\nTarget()\n")
+	writeFile(t, dir, "tracked.go", "Targeted()\nTarget()\nliteral[one]\n")
 	writeFile(t, dir, ".gitignore", "ignored.go\n")
 	gitRun("add", "tracked.go", ".gitignore")
 	writeFile(t, dir, "untracked.go", "Target()\n")
@@ -444,6 +482,21 @@ func TestWorkingTreeSearchFallsBackToGitWithoutRipgrep(t *testing.T) {
 		if !got[path] {
 			t.Errorf("results missing %q: %+v", path, results)
 		}
+	}
+
+	textResults, err := src.SearchText("target")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(textResults) != 3 {
+		t.Fatalf("fallback smart-case results = %d, want 3: %+v", len(textResults), textResults)
+	}
+	literalResults, err := src.SearchText("[")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(literalResults) != 1 || literalResults[0].Location.Line != 3 {
+		t.Fatalf("fallback literal results = %+v, want tracked.go line 3", literalResults)
 	}
 }
 

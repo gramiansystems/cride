@@ -149,6 +149,8 @@ func (m Model) contextualHints() []string {
 		return []string{"`j/k`move", "`enter`open", "`h/l`fold", "`o`order", "`ctrl+l`diff"}
 	case m.overlay.Kind == OverlaySymbolChoice:
 		return m.symbolChoiceHints()
+	case m.overlay.Kind == OverlaySearch:
+		return []string{"type query", "`tab/⇧tab`select", "`enter`open", "`^U`clear", "`esc`close"}
 	case m.overlay.Kind != OverlayNone:
 		return []string{"type to filter", "`enter`accept", "`^O`order", "`esc`close"}
 	case m.enrichmentPanel.Open && m.enrichmentPanel.Kind == enrichmentPanelOutlineDiff:
