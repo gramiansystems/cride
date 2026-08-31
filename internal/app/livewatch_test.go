@@ -185,6 +185,27 @@ func TestUnreadDerivedFromSeenSnapshots(t *testing.T) {
 	}
 }
 
+func TestFileUnreadReusesTrackedDiffHash(t *testing.T) {
+	t.Parallel()
+
+	file := testFile("a.go")
+	m := Model{
+		changeHashes: map[string]string{"a.go": "tracked"},
+		seen:         map[string]string{"a.go": "tracked"},
+	}
+	if m.fileUnread(file) {
+		t.Fatal("tracked hash matching seen snapshot reported unread")
+	}
+
+	// Directly assembled models do not have tracked hashes; they must retain
+	// the exact hashing behavior used before this optimization.
+	m.changeHashes = nil
+	m.seen["a.go"] = fileDiffHash(file)
+	if m.fileUnread(file) {
+		t.Fatal("missing tracked hash did not fall back to the exact diff hash")
+	}
+}
+
 func TestReadKeyMarksReadAndMovesToNextFile(t *testing.T) {
 	t.Parallel()
 

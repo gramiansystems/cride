@@ -36,9 +36,19 @@ func fileDiffHash(f diff.FileDiff) string {
 	return strconv.FormatUint(h.Sum64(), 16)
 }
 
+// trackedFileDiffHash returns the hash captured when the current diff was
+// loaded. Models assembled directly in tests or by embedders may not have
+// passed through updateChangeOrder, so retain the exact-computation fallback.
+func (m Model) trackedFileDiffHash(f diff.FileDiff) string {
+	if hash, ok := m.changeHashes[f.Path()]; ok {
+		return hash
+	}
+	return fileDiffHash(f)
+}
+
 // fileUnread reports whether a file's diff differs from its seen snapshot.
 func (m Model) fileUnread(f diff.FileDiff) bool {
-	return m.seen[f.Path()] != fileDiffHash(f)
+	return m.seen[f.Path()] != m.trackedFileDiffHash(f)
 }
 
 // unreadFileSet maps file indexes to unread state for the change list.
@@ -74,7 +84,7 @@ func (m *Model) markCurrentFileRead() tea.Cmd {
 	if m.seen == nil {
 		m.seen = make(map[string]string)
 	}
-	m.seen[f.Path()] = fileDiffHash(f)
+	m.seen[f.Path()] = m.trackedFileDiffHash(f)
 	return m.notify(ui.ToastInfo, "marked read — "+strconv.Itoa(m.unreadCount())+" unread left")
 }
 
@@ -107,7 +117,7 @@ func (m *Model) markAllRead() tea.Cmd {
 		m.seen = make(map[string]string)
 	}
 	for _, f := range m.files {
-		m.seen[f.Path()] = fileDiffHash(f)
+		m.seen[f.Path()] = m.trackedFileDiffHash(f)
 	}
 	return m.notify(ui.ToastInfo, "all files marked read")
 }
