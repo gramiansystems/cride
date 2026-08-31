@@ -41,6 +41,37 @@ func TestFlattenFullFileMarksChangedCurrentLines(t *testing.T) {
 	}
 }
 
+func TestFlattenFullFileIndexesChangedLinesByHunk(t *testing.T) {
+	t.Parallel()
+
+	files := []diff.FileDiff{{
+		OldPath: "a.go",
+		NewPath: "a.go",
+		Status:  diff.FileModified,
+		Hunks: []diff.Hunk{
+			{Lines: []diff.Line{{Kind: diff.LineAdd, NewLine: 2, Content: "two"}}},
+			{Lines: []diff.Line{{Kind: diff.LineAdd, NewLine: 5, Content: "five"}}},
+		},
+	}}
+
+	rows := FlattenFullFile(files, 0, []string{"one", "two", "three", "four", "five", "six"})
+	for _, tc := range []struct {
+		line    int
+		changed bool
+		hunk    int
+	}{
+		{line: 1},
+		{line: 2, changed: true, hunk: 1},
+		{line: 4},
+		{line: 5, changed: true, hunk: 2},
+	} {
+		row := rows[tc.line-1]
+		if row.Changed != tc.changed || row.HunkIdx != tc.hunk {
+			t.Fatalf("line %d changed/hunk = %v/%d, want %v/%d", tc.line, row.Changed, row.HunkIdx, tc.changed, tc.hunk)
+		}
+	}
+}
+
 func TestFlattenReviewFileFullKeepsDeletedRowsInline(t *testing.T) {
 	t.Parallel()
 

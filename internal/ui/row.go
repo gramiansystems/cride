@@ -87,7 +87,7 @@ func FlattenReviewFile(files []diff.FileDiff, fileIdx int, lines []string, local
 }
 
 func flattenFullFileRows(f diff.FileDiff, fileIdx int, lines []string, reviewInline bool) []Row {
-	changed := changedCurrentLines(f)
+	changed := changedCurrentLineHunks(f)
 	rows := make([]Row, 0, len(lines))
 	events := map[int][]Row{}
 	if reviewInline {
@@ -95,6 +95,7 @@ func flattenFullFileRows(f diff.FileDiff, fileIdx int, lines []string, reviewInl
 	}
 	for i, content := range lines {
 		lineNum := i + 1
+		hunkIdx, lineChanged := changed[lineNum]
 		rows = append(rows, events[lineNum]...)
 		rows = append(rows, Row{
 			Kind:    RowLine,
@@ -104,8 +105,8 @@ func flattenFullFileRows(f diff.FileDiff, fileIdx int, lines []string, reviewInl
 				Content: content,
 				NewLine: lineNum,
 			},
-			Changed: changed[lineNum],
-			HunkIdx: changedLineHunk(f, lineNum),
+			Changed: lineChanged,
+			HunkIdx: hunkIdx,
 		})
 	}
 	rows = append(rows, events[len(lines)+1]...)
@@ -164,7 +165,7 @@ func expandedHunkRows(f diff.FileDiff, fileIdx, hunkIdxZero int, lines []string,
 	start, end := expandedCurrentRange(h, len(lines), extra)
 	events := deletionEventsForHunk(h, fileIdx, hunkIdx, len(lines))
 	emitted := map[int]bool{}
-	changed := changedCurrentLines(f)
+	changed := changedCurrentLineHunks(f)
 	for lineNum := start; lineNum <= end; lineNum++ {
 		if lineNum < 1 || lineNum > len(lines) {
 			continue
@@ -173,6 +174,7 @@ func expandedHunkRows(f diff.FileDiff, fileIdx, hunkIdxZero int, lines []string,
 		if len(events[lineNum]) > 0 {
 			emitted[lineNum] = true
 		}
+		_, lineChanged := changed[lineNum]
 		rows = append(rows, Row{
 			Kind:    RowLine,
 			FileIdx: fileIdx,
@@ -182,7 +184,7 @@ func expandedHunkRows(f diff.FileDiff, fileIdx, hunkIdxZero int, lines []string,
 				Content: lines[lineNum-1],
 				NewLine: lineNum,
 			},
-			Changed: changed[lineNum],
+			Changed: lineChanged,
 		})
 	}
 	for _, anchor := range sortedEventAnchors(events) {
@@ -276,23 +278,20 @@ func sortedEventAnchors(events map[int][]Row) []int {
 	return anchors
 }
 
-func changedLineHunk(f diff.FileDiff, lineNum int) int {
+// changedCurrentLineHunks indexes changed current-side lines in one diff pass.
+// Full-file flattening can then classify every source line in O(1), instead of
+// rescanning every hunk and diff line for each source line.
+func changedCurrentLineHunks(f diff.FileDiff) map[int]int {
+	changed := map[int]int{}
 	for hi, h := range f.Hunks {
 		for _, ln := range h.Lines {
-			if ln.Kind == diff.LineAdd && ln.NewLine == lineNum {
-				return hi + 1
+			if ln.Kind != diff.LineAdd || ln.NewLine < 1 {
+				continue
 			}
-		}
-	}
-	return 0
-}
-
-func changedCurrentLines(f diff.FileDiff) map[int]bool {
-	changed := map[int]bool{}
-	for _, h := range f.Hunks {
-		for _, ln := range h.Lines {
-			if ln.Kind == diff.LineAdd && ln.NewLine > 0 {
-				changed[ln.NewLine] = true
+			// Preserve the old first-match behavior if malformed input repeats a
+			// current line across multiple hunks.
+			if _, exists := changed[ln.NewLine]; !exists {
+				changed[ln.NewLine] = hi + 1
 			}
 		}
 	}
