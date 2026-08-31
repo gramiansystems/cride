@@ -80,10 +80,21 @@ func (m Model) fingerprintCmd() tea.Cmd {
 	}
 }
 
-// reload starts a new diff load without blanking the view; the sequence
-// number drops stale results if loads overlap.
+// reload starts a new diff load without blanking the view. If a load is
+// already running, any number of filesystem/manual requests coalesce into one
+// follow-up so full Git diff buffers cannot accumulate concurrently.
 func (m *Model) reload(manual bool) tea.Cmd {
 	m.saveCurrentFileState()
+	if m.loadInFlight {
+		m.reloadPending = true
+		m.reloadPendingManual = m.reloadPendingManual || manual
+		return nil
+	}
+	return m.startReload(manual)
+}
+
+func (m *Model) startReload(manual bool) tea.Cmd {
+	m.loadInFlight = true
 	m.reloadRequested = manual
 	m.loadSeq++
 	return m.loadCmdSeq(m.loadSeq)

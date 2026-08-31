@@ -1,6 +1,8 @@
 package outline
 
 import (
+	"strconv"
+	"strings"
 	"testing"
 
 	"cride/internal/diff"
@@ -81,6 +83,58 @@ func TestDiffOutlinesAcceptsRenameAtThreshold(t *testing.T) {
 	changes := DiffOutlines(before, after, beforeContent, afterContent, "a.go", "a.go", nil)
 	if len(changes) != 1 || changes[0].Type != SymbolRenamed || changes[0].BodySimilarity != 0.6 {
 		t.Fatalf("threshold changes = %#v", changes)
+	}
+}
+
+func TestDiffOutlinesSkipsFuzzyRenamesBeyondComparisonBudget(t *testing.T) {
+	t.Parallel()
+
+	// Use the smallest square set that exceeds the pair budget. All bodies are
+	// identical, so an unbounded matcher would retain every pair as a rename
+	// candidate.
+	side := 1
+	for side*side <= maxRenameComparisons {
+		side++
+	}
+	before := make([]lsp.DocumentSymbol, 0, side)
+	after := make([]lsp.DocumentSymbol, 0, side)
+	for i := 0; i < side; i++ {
+		before = append(before, testSymbol("a.go", "Old"+strconv.Itoa(i), lsp.SymbolFunction, 1, 1))
+		after = append(after, testSymbol("a.go", "New"+strconv.Itoa(i), lsp.SymbolFunction, 1, 1))
+	}
+
+	changes := DiffOutlines(before, after, []byte("shared()\n"), []byte("shared()\n"), "a.go", "a.go", nil)
+	types := map[ChangeType]int{}
+	for _, change := range changes {
+		types[change.Type]++
+	}
+	if len(changes) != side*2 || types[SymbolRemoved] != side || types[SymbolAdded] != side || types[SymbolRenamed] != 0 {
+		t.Fatalf("budgeted changes: total=%d types=%v, want %d added and removed", len(changes), types, side)
+	}
+}
+
+func TestDiffOutlinesSkipsFuzzyRenamesBeyondLineWorkBudget(t *testing.T) {
+	t.Parallel()
+
+	// Stay exactly within the pair-count budget while making the aggregate
+	// symbol ranges too expensive to scan pairwise.
+	side := 64
+	bodyLines := maxRenameComparedLines/(2*side*side) + 1
+	before := make([]lsp.DocumentSymbol, 0, side)
+	after := make([]lsp.DocumentSymbol, 0, side)
+	for i := 0; i < side; i++ {
+		before = append(before, testSymbol("a.go", "Old"+strconv.Itoa(i), lsp.SymbolFunction, 1, bodyLines))
+		after = append(after, testSymbol("a.go", "New"+strconv.Itoa(i), lsp.SymbolFunction, 1, bodyLines))
+	}
+	content := []byte(strings.Repeat("shared()\n", bodyLines))
+
+	changes := DiffOutlines(before, after, content, content, "a.go", "a.go", nil)
+	types := map[ChangeType]int{}
+	for _, change := range changes {
+		types[change.Type]++
+	}
+	if len(changes) != side*2 || types[SymbolRemoved] != side || types[SymbolAdded] != side || types[SymbolRenamed] != 0 {
+		t.Fatalf("work-budgeted changes: total=%d types=%v, want %d added and removed", len(changes), types, side)
 	}
 }
 

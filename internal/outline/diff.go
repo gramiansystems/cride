@@ -1,12 +1,23 @@
 package outline
 
 import (
+	"bytes"
 	"sort"
 	"strings"
 
 	"cride/internal/diff"
 	"cride/internal/lsp"
 	"cride/internal/source"
+)
+
+const (
+	renameSimilarityThreshold = 0.6
+	// Fuzzy rename matching is inherently pairwise. Keep the optional
+	// convenience bounded so generated files and broad refactors degrade to
+	// added/removed symbols instead of consuming memory in proportion to the
+	// Cartesian product.
+	maxRenameComparisons   = 4096
+	maxRenameComparedLines = 1 << 20
 )
 
 // ChangeType classifies how a declaration participates in the review.
@@ -49,6 +60,11 @@ type SymbolChange struct {
 type qualifiedSymbol struct {
 	symbol lsp.DocumentSymbol
 	key    string
+}
+
+type renamePair struct {
+	bi, ai     int
+	similarity float64
 }
 
 // DiffOutlines matches declarations by qualified name and marks same-name
@@ -98,25 +114,7 @@ func DiffOutlines(before, after []lsp.DocumentSymbol, beforeContent, afterConten
 		})
 	}
 
-	type renamePair struct {
-		bi, ai     int
-		similarity float64
-	}
-	var candidates []renamePair
-	for bi, b := range beforeFlat {
-		if matchedBefore[bi] {
-			continue
-		}
-		for ai, a := range afterFlat {
-			if matchedAfter[ai] || a.symbol.Kind != b.symbol.Kind {
-				continue
-			}
-			similarity := bodySimilarity(beforeContent, b.symbol.Range, afterContent, a.symbol.Range)
-			if similarity >= 0.6 {
-				candidates = append(candidates, renamePair{bi: bi, ai: ai, similarity: similarity})
-			}
-		}
-	}
+	candidates := fuzzyRenameCandidates(beforeFlat, afterFlat, matchedBefore, matchedAfter, beforeContent, afterContent)
 	sort.SliceStable(candidates, func(i, j int) bool { return candidates[i].similarity > candidates[j].similarity })
 	for _, pair := range candidates {
 		if matchedBefore[pair.bi] || matchedAfter[pair.ai] {
@@ -183,6 +181,126 @@ func flattenQualified(symbols []lsp.DocumentSymbol) []qualifiedSymbol {
 	return out
 }
 
+// renameComparisonCount returns the number of compatible unmatched pairs,
+// stopping once the configured budget is exceeded. Counting by symbol kind
+// avoids disabling useful rename detection merely because the two sides have
+// many symbols that could never match.
+func renameComparisonCount(before, after []qualifiedSymbol, matchedBefore, matchedAfter []bool) int {
+	afterByKind := make(map[lsp.SymbolKind]int)
+	for i, item := range after {
+		if !matchedAfter[i] {
+			afterByKind[item.symbol.Kind]++
+		}
+	}
+	comparisons := 0
+	for i, item := range before {
+		if matchedBefore[i] {
+			continue
+		}
+		comparisons += afterByKind[item.symbol.Kind]
+		if comparisons > maxRenameComparisons {
+			return comparisons
+		}
+	}
+	return comparisons
+}
+
+func fuzzyRenameCandidates(before, after []qualifiedSymbol, matchedBefore, matchedAfter []bool, beforeContent, afterContent []byte) []renamePair {
+	comparisons := renameComparisonCount(before, after, matchedBefore, matchedAfter)
+	if comparisons == 0 || comparisons > maxRenameComparisons {
+		return nil
+	}
+
+	beforeLineCount := contentLineCount(beforeContent)
+	afterLineCount := contentLineCount(afterContent)
+	if renameComparisonWork(before, after, matchedBefore, matchedAfter, beforeLineCount, afterLineCount) > maxRenameComparedLines {
+		return nil
+	}
+
+	// Normalizing once avoids splitting and rewriting both complete files for
+	// every candidate pair. Per-pair work below is limited to symbol ranges and
+	// the aggregate range scan is bounded above.
+	beforeLines := normalizedContentLines(beforeContent)
+	afterLines := normalizedContentLines(afterContent)
+	candidates := make([]renamePair, 0, min(comparisons, 64))
+	for bi, b := range before {
+		if matchedBefore[bi] {
+			continue
+		}
+		for ai, a := range after {
+			if matchedAfter[ai] || a.symbol.Kind != b.symbol.Kind {
+				continue
+			}
+			similarity := bodySimilarity(beforeLines, b.symbol.Range, afterLines, a.symbol.Range)
+			if similarity >= renameSimilarityThreshold {
+				candidates = append(candidates, renamePair{bi: bi, ai: ai, similarity: similarity})
+			}
+		}
+	}
+	return candidates
+}
+
+// renameComparisonWork bounds the number of normalized source lines visited
+// across all compatible pairs. A small Cartesian product can still be
+// expensive when every symbol range spans a generated or malformed file.
+func renameComparisonWork(before, after []qualifiedSymbol, matchedBefore, matchedAfter []bool, beforeLineCount, afterLineCount int) int {
+	beforeByKind := make(map[lsp.SymbolKind]int)
+	afterByKind := make(map[lsp.SymbolKind]int)
+	for i, item := range before {
+		if !matchedBefore[i] {
+			beforeByKind[item.symbol.Kind]++
+		}
+	}
+	for i, item := range after {
+		if !matchedAfter[i] {
+			afterByKind[item.symbol.Kind]++
+		}
+	}
+
+	work := 0
+	for i, item := range before {
+		if matchedBefore[i] {
+			continue
+		}
+		work = addRenameComparisonWork(work, normalizedRangeLineCount(beforeLineCount, item.symbol.Range), afterByKind[item.symbol.Kind])
+		if work > maxRenameComparedLines {
+			return work
+		}
+	}
+	for i, item := range after {
+		if matchedAfter[i] {
+			continue
+		}
+		work = addRenameComparisonWork(work, normalizedRangeLineCount(afterLineCount, item.symbol.Range), beforeByKind[item.symbol.Kind])
+		if work > maxRenameComparedLines {
+			return work
+		}
+	}
+	return work
+}
+
+func addRenameComparisonWork(total, lines, pairs int) int {
+	if lines <= 0 || pairs <= 0 {
+		return total
+	}
+	remaining := maxRenameComparedLines - total
+	if remaining < 0 || lines > remaining/pairs {
+		return maxRenameComparedLines + 1
+	}
+	return total + lines*pairs
+}
+
+func contentLineCount(content []byte) int {
+	if len(content) == 0 {
+		return 0
+	}
+	count := bytes.Count(content, []byte{'\n'})
+	if content[len(content)-1] != '\n' {
+		count++
+	}
+	return count
+}
+
 func rangeHasKind(files []diff.FileDiff, path string, r source.Range, kind diff.ChangeKind) bool {
 	if path == "" || path == "/dev/null" {
 		return false
@@ -223,35 +341,53 @@ func rangeHasKind(files []diff.FileDiff, path string, r source.Range, kind diff.
 	return false
 }
 
-func bodySimilarity(before []byte, beforeRange source.Range, after []byte, afterRange source.Range) float64 {
-	beforeLines := normalizedRangeLines(before, beforeRange)
-	afterLines := normalizedRangeLines(after, afterRange)
-	if len(beforeLines) == 0 || len(afterLines) == 0 {
+func normalizedContentLines(content []byte) []string {
+	if len(content) == 0 {
+		return nil
+	}
+	lines := strings.Split(strings.TrimSuffix(string(content), "\n"), "\n")
+	for i, line := range lines {
+		lines[i] = strings.Join(strings.Fields(line), " ")
+	}
+	return lines
+}
+
+func bodySimilarity(before []string, beforeRange source.Range, after []string, afterRange source.Range) float64 {
+	beforeStart, beforeEnd := normalizedRangeBounds(len(before), beforeRange)
+	afterStart, afterEnd := normalizedRangeBounds(len(after), afterRange)
+	if beforeStart >= beforeEnd || afterStart >= afterEnd {
 		return 0
 	}
-	counts := make(map[string]int, len(beforeLines))
-	for _, line := range beforeLines {
-		counts[line]++
+
+	counts := make(map[string]int, min(beforeEnd-beforeStart, 256))
+	beforeCount := 0
+	for _, line := range before[beforeStart:beforeEnd] {
+		if line != "" {
+			counts[line]++
+			beforeCount++
+		}
 	}
-	overlap := 0
-	for _, line := range afterLines {
+	overlap, afterCount := 0, 0
+	for _, line := range after[afterStart:afterEnd] {
+		if line == "" {
+			continue
+		}
+		afterCount++
 		if counts[line] > 0 {
 			overlap++
 			counts[line]--
 		}
 	}
-	denominator := len(beforeLines)
-	if len(afterLines) > denominator {
-		denominator = len(afterLines)
+	if beforeCount == 0 || afterCount == 0 {
+		return 0
 	}
+	denominator := max(beforeCount, afterCount)
 	return float64(overlap) / float64(denominator)
 }
 
-func normalizedRangeLines(content []byte, r source.Range) []string {
-	if len(content) == 0 {
-		return nil
-	}
-	lines := strings.Split(strings.TrimSuffix(string(content), "\n"), "\n")
+// normalizedRangeBounds converts a 1-based inclusive source range into a
+// clamped 0-based half-open slice range.
+func normalizedRangeBounds(lineCount int, r source.Range) (int, int) {
 	start, end := r.Start.Line, r.End.Line
 	if start < 1 {
 		start = 1
@@ -259,20 +395,18 @@ func normalizedRangeLines(content []byte, r source.Range) []string {
 	if end < start {
 		end = start
 	}
-	if start > len(lines) {
-		return nil
+	if start > lineCount {
+		return lineCount, lineCount
 	}
-	if end > len(lines) {
-		end = len(lines)
+	if end > lineCount {
+		end = lineCount
 	}
-	out := make([]string, 0, end-start+1)
-	for _, line := range lines[start-1 : end] {
-		normalized := strings.Join(strings.Fields(line), " ")
-		if normalized != "" {
-			out = append(out, normalized)
-		}
-	}
-	return out
+	return start - 1, end
+}
+
+func normalizedRangeLineCount(lineCount int, r source.Range) int {
+	start, end := normalizedRangeBounds(lineCount, r)
+	return end - start
 }
 
 func changeLine(change SymbolChange) int {

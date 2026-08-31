@@ -198,12 +198,15 @@ type Model struct {
 	splitFiles      map[string]bool // per-file side-by-side toggle (zs)
 	splitActiveLeft bool            // which pair column symbol lookups use
 
-	loadSeq           int    // guards stale diff loads
-	loadedFingerprint string // tree fingerprint captured with the loaded diff
-	treeChanged       bool   // poll fallback noticed drift; ^R reloads
-	watcherActive     bool
-	watchCh           chan struct{}
-	watchStop         func()
+	loadSeq             int    // guards stale diff loads
+	loadInFlight        bool   // at most one diff command may allocate at a time
+	reloadPending       bool   // coalesces any number of events behind that command
+	reloadPendingManual bool   // preserves a queued manual reload's completion toast
+	loadedFingerprint   string // tree fingerprint captured with the loaded diff
+	treeChanged         bool   // poll fallback noticed drift; ^R reloads
+	watcherActive       bool
+	watchCh             chan struct{}
+	watchStop           func()
 
 	seen map[string]string // path → diff hash at last mark-read (unread = current != seen)
 
@@ -381,6 +384,7 @@ func NewWithOptions(src diffsource.Source, opts Options) Model {
 		freshSession:     opts.FreshSession,
 		changeOrder:      ui.DefaultChangeListOrder,
 		loading:          true,
+		loadInFlight:     true,
 		fileStates:       make(map[fileStateKey]fileState),
 		fileContents:     make(map[string]fileContentState),
 		localExpansions:  make(map[string]map[int]int),
@@ -964,11 +968,22 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		reloadRequested := m.reloadRequested
 		m.reloadRequested = false
-		m.loading = false
-		m.err = msg.err
+		m.loadInFlight = false
+		pendingReload, pendingManual := m.reloadPending, m.reloadPendingManual
+		m.reloadPending, m.reloadPendingManual = false, false
 		if msg.err != nil {
+			if pendingReload {
+				// A newer tree event is already waiting, so retry it without
+				// replacing a usable view with the transient error.
+				m.err = nil
+				return m, m.startReload(pendingManual)
+			}
+			m.loading = false
+			m.err = msg.err
 			return m, nil
 		}
+		m.loading = false
+		m.err = nil
 		var toastCmd tea.Cmd
 		if reloadRequested && !m.status.sticky {
 			added, removed, changed := diffDelta(m.files, msg.files)
@@ -1003,9 +1018,17 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if pathLost && !m.status.sticky {
 			toastCmd = m.notify(ui.ToastWarn, "current file left the diff")
 		}
+		m.clampScroll()
+		if pendingReload {
+			// The landed result gives the UI a coherent intermediate view, but
+			// defer content and outline enrichment until the coalesced reload
+			// catches up with the newest tree.
+			m.invalidateOutlines()
+			m.treeChanged = true
+			return m, tea.Batch(m.startReload(pendingManual), toastCmd)
+		}
 		cmd := m.ensureCurrentFileContentCmd()
 		outlineCmd := m.loadOutlinesCmd()
-		m.clampScroll()
 		return m, tea.Batch(cmd, outlineCmd, toastCmd)
 
 	case watchStartedMsg:

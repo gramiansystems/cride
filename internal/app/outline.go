@@ -26,18 +26,25 @@ type outlineDiffLoadedMsg struct {
 // diff generation lands so breadcrumbs are ready without first opening the
 // symbol panel.
 func (m *Model) loadOutlinesCmd() tea.Cmd {
-	m.outlineGeneration++
-	m.outlineLoaded = false
-	m.outlineChanges = nil
-	m.outlineCurrent = nil
-	m.outlineBaseline = nil
+	m.invalidateOutlines()
 	if m.source == nil || len(m.files) == 0 {
-		m.outlineLoading = false
 		m.outlineLoaded = true
 		return nil
 	}
 	m.outlineLoading = true
 	return outlineDiffCmd(m.source, m.lsp, m.outlineExtractor, m.outlineGeneration, append([]diff.FileDiff(nil), m.files...))
+}
+
+// invalidateOutlines makes any older asynchronous result stale and clears the
+// projections derived from the previous diff. Coalesced reloads use this
+// without immediately starting enrichment for an intermediate tree.
+func (m *Model) invalidateOutlines() {
+	m.outlineGeneration++
+	m.outlineLoading = false
+	m.outlineLoaded = false
+	m.outlineChanges = nil
+	m.outlineCurrent = nil
+	m.outlineBaseline = nil
 }
 
 func outlineDiffCmd(src diffsource.Source, client lsp.Client, extractor outline.Extractor, generation int, files []diff.FileDiff) tea.Cmd {

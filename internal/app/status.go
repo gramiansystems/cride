@@ -70,7 +70,7 @@ func spinnerTickCmd() tea.Cmd {
 }
 
 func (m Model) anythingLoading() bool {
-	if m.loading || m.projectFilesLoading || m.overlay.Loading ||
+	if m.loading || m.loadInFlight || m.projectFilesLoading || m.overlay.Loading ||
 		m.referencePanel.Loading || m.enrichmentPanel.Loading || m.outlineLoading {
 		return true
 	}

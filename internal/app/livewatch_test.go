@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -54,26 +55,58 @@ func TestReloadReAnchorsCursorBySourceLine(t *testing.T) {
 	}
 }
 
-func TestReloadDropsStaleSequences(t *testing.T) {
+func TestReloadCoalescesWhileLoadIsInFlight(t *testing.T) {
 	t.Parallel()
 
-	m := Model{files: testFiles(), width: 90, height: 24}
-	cmd1 := m.reload(false)
-	cmd2 := m.reload(false)
-	_ = cmd1
-	_ = cmd2
-
-	// A result from the first (stale) load must be ignored.
-	next, _ := m.Update(diffLoadedMsg{seq: m.loadSeq - 1, files: nil})
-	m = next.(Model)
-	if len(m.files) == 0 {
-		t.Fatal("stale reload result was applied")
+	m := Model{source: fakeSource{}, files: testFiles(), width: 90, height: 24, outlineGeneration: 2, outlineLoaded: true}
+	firstCmd := m.reload(false)
+	firstSeq := m.loadSeq
+	queuedCmd := m.reload(true)
+	_ = m.reload(false)
+	if firstCmd == nil || queuedCmd != nil {
+		t.Fatalf("reload commands: first=%v queued=%v, want command then nil", firstCmd != nil, queuedCmd != nil)
 	}
-	// The newest one lands.
-	next, _ = m.Update(diffLoadedMsg{seq: m.loadSeq, files: []diff.FileDiff{testFile("only.go")}})
+	if m.loadSeq != firstSeq || !m.loadInFlight || !m.reloadPending || !m.reloadPendingManual {
+		t.Fatalf("queued reload state: seq=%d inFlight=%v pending=%v manual=%v", m.loadSeq, m.loadInFlight, m.reloadPending, m.reloadPendingManual)
+	}
+
+	// Landing the active result starts exactly one coalesced follow-up. A
+	// queued manual request stays manual even if later automatic events arrive.
+	next, followupCmd := m.Update(diffLoadedMsg{seq: firstSeq, files: []diff.FileDiff{testFile("intermediate.go")}})
 	m = next.(Model)
-	if len(m.files) != 1 || m.files[0].Path() != "only.go" {
+	if followupCmd == nil || m.loadSeq != firstSeq+1 || !m.loadInFlight || m.reloadPending || !m.reloadRequested {
+		t.Fatalf("follow-up state: cmd=%v seq=%d inFlight=%v pending=%v manual=%v", followupCmd != nil, m.loadSeq, m.loadInFlight, m.reloadPending, m.reloadRequested)
+	}
+	if len(m.files) != 1 || m.files[0].Path() != "intermediate.go" {
+		t.Fatalf("intermediate reload not applied: %v", m.files)
+	}
+	if m.outlineGeneration != 3 || m.outlineLoaded || m.outlineLoading {
+		t.Fatalf("intermediate outlines not invalidated: generation=%d loaded=%v loading=%v", m.outlineGeneration, m.outlineLoaded, m.outlineLoading)
+	}
+
+	// The follow-up completes without scheduling a third load.
+	next, _ = m.Update(diffLoadedMsg{seq: m.loadSeq, files: []diff.FileDiff{testFile("latest.go")}})
+	m = next.(Model)
+	if m.loadInFlight || m.reloadPending || m.reloadRequested {
+		t.Fatalf("completed reload state: inFlight=%v pending=%v manual=%v", m.loadInFlight, m.reloadPending, m.reloadRequested)
+	}
+	if len(m.files) != 1 || m.files[0].Path() != "latest.go" {
 		t.Fatalf("latest reload result not applied: %v", m.files)
+	}
+}
+
+func TestReloadRetriesPendingEventAfterTransientError(t *testing.T) {
+	t.Parallel()
+
+	m := Model{source: fakeSource{}, files: testFiles(), width: 90, height: 24}
+	_ = m.reload(false)
+	seq := m.loadSeq
+	_ = m.reload(false)
+
+	next, cmd := m.Update(diffLoadedMsg{seq: seq, err: errors.New("transient reload failure")})
+	m = next.(Model)
+	if cmd == nil || !m.loadInFlight || m.loadSeq != seq+1 || m.err != nil {
+		t.Fatalf("retry after error: cmd=%v inFlight=%v seq=%d err=%v", cmd != nil, m.loadInFlight, m.loadSeq, m.err)
 	}
 }
 
