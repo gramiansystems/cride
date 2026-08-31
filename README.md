@@ -113,7 +113,8 @@ Run `cride --help` for the complete command-line reference.
 | `n` / `N` | Next / previous unread file |
 | `R` / `U` / `A` | Mark read and advance / unread / all read |
 | `]c` / `[c` | Next / previous hunk |
-| `}` / `{` | Next / previous changed file |
+| `}` / `{` | Next / previous file in the file view |
+| `ctrl+a` | Toggle all repository files / diff files only |
 | `c` / `C` | Line comment / general comment |
 | `ctrl+s` / `e` | Save `review.md` without leaving cride |
 | `ctrl+r` | Reload the diff and import edits from `review.md` |

@@ -39,6 +39,9 @@ const (
 	FileAdded
 	FileDeleted
 	FileRenamed
+	// FileUnchanged is a current-side project file included for navigation,
+	// rather than a member of the review diff.
+	FileUnchanged
 )
 
 // FileDiff is the review diff for a single file.

@@ -144,8 +144,11 @@ therefore operate on visible terminal lines while selection and comments stay
 attached to source rows.
 
 The change list, main review pane, bottom enrichment panel, command palette,
-and search overlays are projections of the same model. A contextual footer
-combines baseline/change statistics, prompts, progress, and transient errors.
+and search overlays are projections of the same model. The change list may
+also include unchanged current-side project files as navigation entries; they
+remain excluded from diff statistics, unread state, and review indexing. A
+contextual footer combines baseline/change statistics, prompts, progress, and
+transient errors.
 
 ## Code intelligence
 

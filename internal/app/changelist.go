@@ -291,6 +291,9 @@ func (m *Model) openFileFromList(fileIdx int) tea.Cmd {
 	}
 	m.saveCurrentFileState()
 	m.selectedFile = fileIdx
+	if m.files[fileIdx].Status == diff.FileUnchanged {
+		m.viewMode = ViewFile
+	}
 	m.restoreCurrentFileState()
 	m.rememberPath(m.currentFilePath())
 	m.clampScroll()

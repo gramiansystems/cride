@@ -48,11 +48,17 @@ type Footer struct {
 // FooterStats formats the left footer segment for the current review.
 func FooterStats(files []diff.FileDiff, baseline string) string {
 	adds, dels := totalChanges(files)
+	changedFiles := 0
+	for _, file := range files {
+		if file.Status != diff.FileUnchanged {
+			changedFiles++
+		}
+	}
 	comparison := "baseline " + baseline
 	if isCommitComparison(baseline) {
 		comparison = "commits " + baseline
 	}
-	return fmt.Sprintf(" %d files · ", len(files)) + changeStat(adds, dels) + " · " + comparison
+	return fmt.Sprintf(" %d files · ", changedFiles) + changeStat(adds, dels) + " · " + comparison
 }
 
 // DefaultFooterHints is the fallback hint set when the app supplies none.

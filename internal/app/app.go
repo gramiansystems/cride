@@ -117,6 +117,8 @@ type Model struct {
 	projectFiles        []string
 	projectFilesLoading bool
 	projectFilesErr     error
+	includeAllFiles     bool
+	announceAllFiles    bool
 	recentPaths         []string
 
 	overlay          overlayState
@@ -532,6 +534,108 @@ func (m *Model) loadProjectFilesCmd() tea.Cmd {
 		files, err := src.ProjectFiles()
 		return projectFilesLoadedMsg{files: files, err: err}
 	}
+}
+
+// toggleAllProjectFiles switches the file list between the review diff and
+// every file visible on the current side of the repository.
+func (m *Model) toggleAllProjectFiles() tea.Cmd {
+	if m.includeAllFiles {
+		return m.resetToDiffFiles()
+	}
+	return m.addAllProjectFilesToView()
+}
+
+// addAllProjectFilesToView keeps the review diff intact while populating the
+// file list with every file visible on the current side of the repository.
+// ProjectFiles is shared with fuzzy-open, so use the cached result when one is
+// already available and otherwise finish the action when its load message
+// arrives.
+func (m *Model) addAllProjectFilesToView() tea.Cmd {
+	if m.source == nil {
+		return m.notify(ui.ToastError, "cannot load project files")
+	}
+	m.includeAllFiles = true
+	if m.projectFiles == nil {
+		m.announceAllFiles = true
+		return m.loadProjectFilesCmd()
+	}
+	return m.setProjectFilesInView(m.projectFiles, true)
+}
+
+func (m *Model) setProjectFilesInView(paths []string, notifyAdded bool) tea.Cmd {
+	previousPath := m.currentFilePath()
+	hadFiles := len(m.files) > 0
+	m.saveCurrentFileState()
+
+	reviewFiles := make([]diff.FileDiff, 0, len(m.files))
+	for _, file := range m.files {
+		if file.Status != diff.FileUnchanged {
+			reviewFiles = append(reviewFiles, file)
+		}
+	}
+	m.files = mergeProjectFiles(reviewFiles, paths)
+	m.selectedFile = fileIndexByPath(m.files, previousPath)
+	if previousPath == "" && !hadFiles && len(m.files) > 0 {
+		m.viewMode = ViewFile
+	}
+	if m.selectedFile >= 0 && m.selectedFile < len(m.files) && m.files[m.selectedFile].Status == diff.FileUnchanged {
+		m.viewMode = ViewFile
+	}
+	m.restoreCurrentFileState()
+	m.clampScroll()
+	m.syncChangeListScroll()
+
+	contentCmd := m.ensureCurrentFileContentCmd()
+	if !notifyAdded {
+		return contentCmd
+	}
+	return tea.Batch(contentCmd, m.notify(ui.ToastInfo, "all current project files added to the file view"))
+}
+
+func (m *Model) resetToDiffFiles() tea.Cmd {
+	previousPath := m.currentFilePath()
+	m.saveCurrentFileState()
+
+	reviewFiles := make([]diff.FileDiff, 0, len(m.files))
+	for _, file := range m.files {
+		if file.Status != diff.FileUnchanged {
+			reviewFiles = append(reviewFiles, file)
+		}
+	}
+	m.files = reviewFiles
+	m.includeAllFiles = false
+	m.announceAllFiles = false
+	m.viewMode = ViewDiff
+	m.selectedFile = findFileIndexByPath(m.files, previousPath)
+	previousPathLost := m.selectedFile < 0
+	if previousPathLost {
+		m.selectedFile = 0
+	}
+	m.restoreCurrentFileState()
+	if previousPathLost {
+		m.selectFirstDisplayedFile()
+	}
+	m.clampScroll()
+	m.syncChangeListScroll()
+	return m.notify(ui.ToastInfo, "file view reset to diff files")
+}
+
+func mergeProjectFiles(reviewFiles []diff.FileDiff, paths []string) []diff.FileDiff {
+	files := append([]diff.FileDiff(nil), reviewFiles...)
+	seen := make(map[string]bool, len(files)+len(paths))
+	for _, file := range files {
+		if path := file.Path(); path != "" {
+			seen[path] = true
+		}
+	}
+	for _, path := range paths {
+		if path == "" || path == "/dev/null" || seen[path] {
+			continue
+		}
+		seen[path] = true
+		files = append(files, diff.FileDiff{OldPath: path, NewPath: path, Status: diff.FileUnchanged})
+	}
+	return files
 }
 
 func debounceSearchCmd(generation int, query string, regex bool) tea.Cmd {
@@ -1029,7 +1133,11 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		cmd := m.ensureCurrentFileContentCmd()
 		outlineCmd := m.loadOutlinesCmd()
-		return m, tea.Batch(cmd, outlineCmd, toastCmd)
+		var projectFilesCmd tea.Cmd
+		if m.includeAllFiles {
+			projectFilesCmd = m.loadProjectFilesCmd()
+		}
+		return m, tea.Batch(cmd, outlineCmd, projectFilesCmd, toastCmd)
 
 	case watchStartedMsg:
 		if msg.err != nil || msg.stop == nil {
@@ -1162,6 +1270,14 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.overlay.Kind == OverlayFileOpen {
 			m.refreshFileOpenResults()
+		}
+		if m.includeAllFiles {
+			announce := m.announceAllFiles
+			m.announceAllFiles = false
+			if msg.err != nil {
+				return m, m.notify(ui.ToastError, "cannot add project files: "+msg.err.Error())
+			}
+			return m, m.setProjectFilesInView(m.projectFiles, announce)
 		}
 		return m, nil
 
@@ -1490,6 +1606,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	id := map[string]string{
 		"q":         commandQuit,
 		"ctrl+c":    commandQuit,
+		"ctrl+a":    commandToggleAllFiles,
 		"?":         commandOpenPalette,
 		"f1":        commandOpenPalette,
 		"ctrl+p":    commandOpenFile,
@@ -2776,7 +2893,7 @@ func (m *Model) ensureFileIndex(path string) int {
 	if idx := findFileIndexByPath(m.files, path); idx >= 0 {
 		return idx
 	}
-	m.files = append(m.files, diff.FileDiff{OldPath: path, NewPath: path, Status: diff.FileModified})
+	m.files = append(m.files, diff.FileDiff{OldPath: path, NewPath: path, Status: diff.FileUnchanged})
 	return len(m.files) - 1
 }
 
@@ -3654,6 +3771,9 @@ func (m *Model) switchFile(dir int) {
 	target := order[targetPos]
 	m.saveCurrentFileState()
 	m.selectedFile = target
+	if m.files[target].Status == diff.FileUnchanged {
+		m.viewMode = ViewFile
+	}
 	m.restoreCurrentFileState()
 	m.rememberPath(m.currentFilePath())
 }
@@ -3668,7 +3788,11 @@ func (m *Model) switchFileN(dir, count int) {
 	}
 }
 
-func (m *Model) toggleViewMode() {
+func (m *Model) toggleViewMode() tea.Cmd {
+	if m.selectedFile >= 0 && m.selectedFile < len(m.files) && m.files[m.selectedFile].Status == diff.FileUnchanged {
+		m.viewMode = ViewFile
+		return m.notify(ui.ToastInfo, "unchanged files use the full-file view")
+	}
 	path := m.currentFilePath()
 	if m.viewMode == ViewFile {
 		jumpAnchor, syncJump := m.takeViewJumpAnchor(path)
@@ -3690,7 +3814,7 @@ func (m *Model) toggleViewMode() {
 			}
 			m.diffViewOrigins[path] = m.captureDiffViewPosition()
 		}
-		return
+		return nil
 	}
 
 	_, syncJump := m.takeViewJumpAnchor(path)
@@ -3714,6 +3838,7 @@ func (m *Model) toggleViewMode() {
 	if !anchoredFileView {
 		m.clampScroll()
 	}
+	return nil
 }
 
 func (m *Model) captureDiffViewPosition() diffViewPosition {
@@ -4241,6 +4366,9 @@ func splitContentLines(content []byte) []string {
 func changedPathSet(files []diff.FileDiff) map[string]bool {
 	paths := map[string]bool{}
 	for _, f := range files {
+		if f.Status == diff.FileUnchanged {
+			continue
+		}
 		path := f.Path()
 		if path != "" && path != "/dev/null" {
 			paths[path] = true
@@ -4348,6 +4476,9 @@ func changedLineSet(files []diff.FileDiff) map[string]map[int]bool {
 func (m Model) changedFilePaths() []string {
 	paths := make([]string, 0, len(m.files))
 	for _, f := range m.files {
+		if f.Status == diff.FileUnchanged {
+			continue
+		}
 		path := f.Path()
 		if path != "" && path != "/dev/null" {
 			paths = append(paths, path)

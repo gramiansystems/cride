@@ -170,6 +170,9 @@ func NewReviewIndex(files []FileDiff, options ...ReviewIndexOption) StaticReview
 }
 
 func (idx *StaticReviewIndex) indexFile(file FileDiff) {
+	if file.Status == FileUnchanged {
+		return
+	}
 	path := file.Path()
 	if validReviewPath(path) {
 		idx.changedFiles[path] = true

@@ -158,7 +158,11 @@ func (m Model) contextualHints() []string {
 	case m.enrichmentPanel.Open || m.referencePanel.Open:
 		return []string{"`J/K`select", "`enter`jump", "`^W`dock", "`o`order", "`esc`close"}
 	case m.viewMode == ViewFile:
-		hints := []string{"`j/k`move", "`tab`diff", "`gd`def", "`gr`refs", "`^P`open"}
+		hints := []string{"`j/k`move"}
+		if m.selectedFile >= 0 && m.selectedFile < len(m.files) && m.files[m.selectedFile].Status != diff.FileUnchanged {
+			hints = append(hints, "`tab`diff")
+		}
+		hints = append(hints, "`gd`def", "`gr`refs", "`^P`open")
 		if len(m.jumplist) > 0 {
 			hints = append(hints, "`^O`back")
 		}
@@ -172,10 +176,16 @@ func (m Model) contextualHints() []string {
 func diffDelta(prev, next []diff.FileDiff) (added, removed, changed int) {
 	prevByPath := make(map[string]diff.FileDiff, len(prev))
 	for _, f := range prev {
+		if f.Status == diff.FileUnchanged {
+			continue
+		}
 		prevByPath[f.Path()] = f
 	}
 	nextPaths := make(map[string]bool, len(next))
 	for _, f := range next {
+		if f.Status == diff.FileUnchanged {
+			continue
+		}
 		path := f.Path()
 		nextPaths[path] = true
 		before, ok := prevByPath[path]

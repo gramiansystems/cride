@@ -74,6 +74,19 @@ func TestRenderBrowsingShape(t *testing.T) {
 	}
 }
 
+func TestFooterStatsIgnoreUnchangedNavigationFiles(t *testing.T) {
+	t.Parallel()
+
+	files := []diff.FileDiff{
+		{NewPath: "changed.go", Status: diff.FileModified, Added: 2, Deleted: 1},
+		{NewPath: "unchanged.go", Status: diff.FileUnchanged},
+	}
+	stats := FooterStats(files, "HEAD")
+	if !strings.Contains(stats, "1 files") || !strings.Contains(stats, "+2") || !strings.Contains(stats, "-1") {
+		t.Fatalf("footer stats = %q, want only the changed file", stats)
+	}
+}
+
 func TestRenderStaysWithinTerminalBounds(t *testing.T) {
 	t.Parallel()
 

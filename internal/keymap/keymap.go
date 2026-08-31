@@ -37,7 +37,8 @@ var Groups = []Group{
 		{"{count}G", "Jump to a source line"},
 	}},
 	{"Files & panes", []Binding{
-		{"{/}, J, ]]/[[", "Move between changed files"},
+		{"{/}, J, ]]/[[", "Move between files in the file view"},
+		{"ctrl+a", "Toggle all repository files / diff files only"},
 		{"ctrl+h / ctrl+l", "Focus the change list / the diff"},
 		{"o", "Toggle file list path/change order"},
 		{"h/l", "Fold/unfold directories when the list has focus"},

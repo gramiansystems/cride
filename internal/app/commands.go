@@ -60,6 +60,7 @@ var commandPaletteCategories = []CommandCategory{
 const (
 	commandCallsIncoming         = "calls.incoming"
 	commandCallsOutgoing         = "calls.outgoing"
+	commandToggleAllFiles        = "files.toggle-all"
 	commandChangeLine            = "edit.change-line"
 	commandChangeToLineEnd       = "edit.change-to-line-end"
 	commandCloseActivePanel      = "app.close-active-panel"
@@ -165,6 +166,9 @@ const (
 )
 
 var commandCatalog = []Command{
+	command(commandToggleAllFiles, "Toggle all project files", "ctrl+a", "Toggle the file view between all current project files and diff files only.", reviewOnly(func(c CommandContext) tea.Cmd {
+		return c.Model.toggleAllProjectFiles()
+	})),
 	command(commandEditAppend, "Append after cursor", "a", "Enter insert mode after the cursor.", func(c CommandContext) tea.Cmd {
 		if c.Model.mode == modeEdit {
 			return c.Model.startInsert(insertAfterCursor)
@@ -404,7 +408,7 @@ var commandCatalog = []Command{
 	command(commandNextAnnotation, "Next comment", "]a", "Jump to the next review comment.", reviewOnly(func(c CommandContext) tea.Cmd {
 		return c.Model.stepAnnotation(1)
 	})),
-	command(commandNextFile, "Next file", "} / J / ]]", "Open the next changed file.", reviewOnly(func(c CommandContext) tea.Cmd {
+	command(commandNextFile, "Next file", "} / J / ]]", "Open the next file in the file view.", reviewOnly(func(c CommandContext) tea.Cmd {
 		c.Model.switchFileN(1, commandCount(c))
 		return c.Model.ensureCurrentFileContentCmd()
 	})),
@@ -447,7 +451,7 @@ var commandCatalog = []Command{
 	command(commandPreviousAnnotation, "Previous comment", "[a", "Jump to the previous review comment.", reviewOnly(func(c CommandContext) tea.Cmd {
 		return c.Model.stepAnnotation(-1)
 	})),
-	command(commandPreviousFile, "Previous file", "{ / [[", "Open the previous changed file.", reviewOnly(func(c CommandContext) tea.Cmd {
+	command(commandPreviousFile, "Previous file", "{ / [[", "Open the previous file in the file view.", reviewOnly(func(c CommandContext) tea.Cmd {
 		c.Model.switchFileN(-1, commandCount(c))
 		return c.Model.ensureCurrentFileContentCmd()
 	})),
@@ -540,8 +544,7 @@ var commandCatalog = []Command{
 		return c.Model.toggleChangeListOrder()
 	})),
 	preserveCommandScroll(command(commandToggleFullFile, "Toggle full-file view", "tab / zf", "Toggle between diff and full-file views.", reviewOnly(func(c CommandContext) tea.Cmd {
-		c.Model.toggleViewMode()
-		return c.Model.ensureCurrentFileContentCmd()
+		return tea.Batch(c.Model.toggleViewMode(), c.Model.ensureCurrentFileContentCmd())
 	}))),
 	command(commandToggleOutlineScope, "Toggle outline file/review scope", "s", "Toggle the changed-symbol outline between the current file and whole review.", reviewOnly(func(c CommandContext) tea.Cmd {
 		if c.Model.enrichmentPanel.Open && c.Model.enrichmentPanel.Kind == enrichmentPanelOutlineDiff {
@@ -619,6 +622,7 @@ func commandPaletteCategory(id string) CommandCategory {
 		commandOpenListSelection,
 		commandPreviousFile,
 		commandPreviousUnreadOrMatch,
+		commandToggleAllFiles,
 		commandToggleFileListOrder:
 		return CommandCategoryFiles
 

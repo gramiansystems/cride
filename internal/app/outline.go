@@ -61,7 +61,7 @@ func outlineDiffCmd(src diffsource.Source, client lsp.Client, extractor outline.
 			baseline:   make(map[string][]lsp.DocumentSymbol),
 		}
 		for _, file := range files {
-			if file.Binary {
+			if file.Binary || file.Status == diff.FileUnchanged {
 				continue
 			}
 			oldPath, newPath := reviewSidePaths(file)

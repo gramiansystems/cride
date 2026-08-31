@@ -24,7 +24,8 @@ Press `?` (or `F1`, `g?`) inside cride for the categorized, executable command p
 
 | Keys | Action |
 | --- | --- |
-| `{/}, J, ]]/[[` | Move between changed files |
+| `{/}, J, ]]/[[` | Move between files in the file view |
+| `ctrl+a` | Toggle all repository files / diff files only |
 | `ctrl+h / ctrl+l` | Focus the change list / the diff |
 | `o` | Toggle file list path/change order |
 | `h/l` | Fold/unfold directories when the list has focus |

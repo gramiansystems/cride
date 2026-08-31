@@ -431,7 +431,7 @@ func renderHeader(files []diff.FileDiff, baseline string, width int) string {
 			label = fmt.Sprintf(" [commits] %s", baseline)
 		}
 	}
-	if len(files) == 0 {
+	if changedFileCount(files) == 0 {
 		label += " (clean)"
 	}
 	return headerStyle.Width(width).Render(truncate.String(label, uint(max(1, width))))
@@ -999,14 +999,29 @@ func isANSICommandByte(b byte) bool {
 
 func totalChanges(files []diff.FileDiff) (adds, dels int) {
 	for _, f := range files {
+		if f.Status == diff.FileUnchanged {
+			continue
+		}
 		adds += f.Added
 		dels += f.Deleted
 	}
 	return adds, dels
 }
 
+func changedFileCount(files []diff.FileDiff) int {
+	count := 0
+	for _, file := range files {
+		if file.Status != diff.FileUnchanged {
+			count++
+		}
+	}
+	return count
+}
+
 func statusLetter(s diff.FileStatus) string {
 	switch s {
+	case diff.FileUnchanged:
+		return " "
 	case diff.FileAdded:
 		return addStyle.Render("A")
 	case diff.FileDeleted:

@@ -113,6 +113,17 @@ func (m *Model) stopWatching() {
 // line, not row index, so shifted hunks don't move the eye.
 func (m *Model) applyReloadedDiff(files []diff.FileDiff) (previousPathLost bool) {
 	previousPath := m.currentFilePath()
+	projectFiles := m.projectFiles
+	if m.includeAllFiles && projectFiles == nil {
+		// A project-file refresh may still be in flight when another diff
+		// lands. Preserve the current-side paths already in the view until
+		// the fresh listing arrives instead of briefly dropping them.
+		for _, file := range m.files {
+			if path := file.NewPath; path != "" && path != "/dev/null" {
+				projectFiles = append(projectFiles, path)
+			}
+		}
+	}
 	prevSrcLine := 0
 	if rows := m.currentRows(); m.cursor >= 0 && m.cursor < len(rows) {
 		prevSrcLine = sourceLine(rows[m.cursor])
@@ -120,6 +131,9 @@ func (m *Model) applyReloadedDiff(files []diff.FileDiff) (previousPathLost bool)
 	m.saveCurrentFileState()
 
 	m.files = files
+	if m.includeAllFiles && projectFiles != nil {
+		m.files = mergeProjectFiles(m.files, projectFiles)
+	}
 	m.changedPaths = changedPathSet(files)
 	m.fileContents = make(map[string]fileContentState)
 	m.contentGeneration++

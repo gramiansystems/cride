@@ -2,6 +2,17 @@ package diff
 
 import "testing"
 
+func TestReviewIndexIgnoresUnchangedNavigationFiles(t *testing.T) {
+	t.Parallel()
+
+	idx := NewReviewIndex([]FileDiff{{
+		OldPath: "unchanged.go", NewPath: "unchanged.go", Status: FileUnchanged,
+	}})
+	if idx.IsChanged("unchanged.go") {
+		t.Fatal("unchanged navigation file was indexed as a review change")
+	}
+}
+
 func TestReviewIndexMarkersForAddedContextDeletedRows(t *testing.T) {
 	t.Parallel()
 

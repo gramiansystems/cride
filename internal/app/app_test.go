@@ -58,6 +58,55 @@ func TestFileNavigationSwitchesFilesAndRestoresState(t *testing.T) {
 	}
 }
 
+func TestCtrlATogglesAllProjectFilesInFileView(t *testing.T) {
+	t.Parallel()
+
+	files := []diff.FileDiff{testFile("a.go")}
+	m := Model{
+		source:       fakeSource{projectFiles: []string{"a.go", "b.go", "dir/c.go"}},
+		files:        files,
+		changedPaths: changedPathSet(files),
+		selectedFile: 0,
+		width:        100,
+		height:       24,
+	}
+
+	next, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlA})
+	got := next.(Model)
+	if cmd == nil || !got.includeAllFiles {
+		t.Fatal("ctrl+a did not start loading all project files")
+	}
+	next, _ = got.Update(cmd())
+	got = next.(Model)
+
+	if len(got.files) != 3 {
+		t.Fatalf("file view has %d files, want 3", len(got.files))
+	}
+	if got.files[0].Status != diff.FileModified || got.files[1].Status != diff.FileUnchanged || got.files[2].Status != diff.FileUnchanged {
+		t.Fatalf("file statuses = %v, %v, %v; want changed then unchanged", got.files[0].Status, got.files[1].Status, got.files[2].Status)
+	}
+	if got.unreadCount() != 1 {
+		t.Fatalf("unread count = %d, want only the changed file", got.unreadCount())
+	}
+	if len(got.reviewChangedPaths()) != 1 || !got.reviewChangedPaths()["a.go"] {
+		t.Fatalf("review paths = %v, want only a.go", got.reviewChangedPaths())
+	}
+
+	got.switchFile(1)
+	if got.currentFilePath() != "b.go" || got.viewMode != ViewFile {
+		t.Fatalf("next file = %q in mode %v, want b.go in full-file view", got.currentFilePath(), got.viewMode)
+	}
+
+	next, cmd = got.handleKey(tea.KeyMsg{Type: tea.KeyCtrlA})
+	got = next.(Model)
+	if cmd == nil {
+		t.Fatal("second ctrl+a returned no status command")
+	}
+	if got.includeAllFiles || len(got.files) != 1 || got.currentFilePath() != "a.go" || got.viewMode != ViewDiff {
+		t.Fatalf("second ctrl+a left includeAll=%v, files=%d, selected=%q, mode=%v; want diff-only a.go", got.includeAllFiles, len(got.files), got.currentFilePath(), got.viewMode)
+	}
+}
+
 func TestFileNavigationDoesNotWrap(t *testing.T) {
 	t.Parallel()
 

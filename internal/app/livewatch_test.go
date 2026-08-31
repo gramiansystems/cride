@@ -55,6 +55,32 @@ func TestReloadReAnchorsCursorBySourceLine(t *testing.T) {
 	}
 }
 
+func TestReloadKeepsIncludedProjectFiles(t *testing.T) {
+	t.Parallel()
+
+	reviewFiles := []diff.FileDiff{testFile("a.go")}
+	m := Model{
+		files:           mergeProjectFiles(reviewFiles, []string{"a.go", "b.go"}),
+		changedPaths:    changedPathSet(reviewFiles),
+		projectFiles:    []string{"a.go", "b.go"},
+		includeAllFiles: true,
+		selectedFile:    1,
+		viewMode:        ViewFile,
+		width:           90,
+		height:          24,
+	}
+
+	if lost := m.applyReloadedDiff([]diff.FileDiff{testFileWithAddedLine("a.go", 2)}); lost {
+		t.Fatal("unchanged selected project file was reported as lost")
+	}
+	if len(m.files) != 2 || m.currentFilePath() != "b.go" || m.files[1].Status != diff.FileUnchanged {
+		t.Fatalf("reloaded file view = %+v selected %q, want changed a.go plus selected b.go", m.files, m.currentFilePath())
+	}
+	if m.projectFiles != nil {
+		t.Fatal("reload did not invalidate project files for a fresh listing")
+	}
+}
+
 func TestReloadCoalescesWhileLoadIsInFlight(t *testing.T) {
 	t.Parallel()
 

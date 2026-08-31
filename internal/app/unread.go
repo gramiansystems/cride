@@ -48,6 +48,9 @@ func (m Model) trackedFileDiffHash(f diff.FileDiff) string {
 
 // fileUnread reports whether a file's diff differs from its seen snapshot.
 func (m Model) fileUnread(f diff.FileDiff) bool {
+	if f.Status == diff.FileUnchanged {
+		return false
+	}
 	return m.seen[f.Path()] != m.trackedFileDiffHash(f)
 }
 

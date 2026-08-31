@@ -391,7 +391,10 @@ func changeListRowLabel(row ChangeListRow, files []diff.FileDiff, width int) str
 	}
 
 	f := files[row.FileIdx]
-	stat := " " + changeStat(f.Added, f.Deleted)
+	stat := ""
+	if f.Status != diff.FileUnchanged {
+		stat = " " + changeStat(f.Added, f.Deleted)
+	}
 	badge := "  "
 	if row.Unread {
 		badge = unreadBadgeStyle.Render("● ")
