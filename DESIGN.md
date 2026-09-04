@@ -144,7 +144,9 @@ therefore operate on visible terminal lines while selection and comments stay
 attached to source rows.
 
 The change list, main review pane, bottom enrichment panel, command palette,
-and search overlays are projections of the same model. The change list may
+and search overlays are projections of the same model. Search Everywhere
+combines immediate fuzzy filename results with debounced workspace-symbol
+results, keeping the file group first. The change list may
 also include unchanged current-side project files as navigation entries; they
 remain excluded from diff statistics, unread state, and review indexing. A
 contextual footer combines baseline/change statistics, prompts, progress, and
@@ -164,7 +166,10 @@ Navigation uses a fallback chain designed for unstable agent worktrees:
 The stdio LSP client supports definitions, references, hover, diagnostics,
 document/workspace symbols, and incoming/outgoing call hierarchy. Requests
 have timeouts and unavailable servers degrade the feature rather than failing
-the review.
+the review. Search Everywhere enriches workspace-symbol definitions with their
+source lines and a bounded lexical usage pass. A separate grep phase supplies
+scored text matches and lexical symbol fallback, then the UI groups files,
+symbols, and grep results in that order.
 
 All current Go dependencies are pure Go; the core build has no intentional CGO
 requirement.

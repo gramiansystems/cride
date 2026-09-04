@@ -428,9 +428,8 @@ var commandCatalog = []Command{
 	command(commandEditOpenLineBelow, "Open line below", "o", "Open a new line below and enter insert mode.", editOnly(func(c CommandContext) tea.Cmd {
 		return c.Model.openLine(false)
 	})),
-	command(commandOpenFile, "Open file", "ctrl+p", "Open a project file by fuzzy name.", reviewOnly(func(c CommandContext) tea.Cmd {
-		c.Model.openFileOverlay()
-		return c.Model.loadProjectFilesCmd()
+	command(commandOpenFile, "Search everywhere", "shift shift / ctrl+p", "Find project files and symbols with fuzzy matching.", reviewOnly(func(c CommandContext) tea.Cmd {
+		return c.Model.openNavigateOverlay()
 	})),
 	command(commandOpenListSelection, "Open selected change-list item", "enter", "Open the selected file or toggle the selected directory.", reviewOnly(func(c CommandContext) tea.Cmd {
 		return c.Model.openSelectedChangeListItem()

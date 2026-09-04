@@ -62,6 +62,105 @@ func TestRankFilesPrefersChangedFilesWhenFuzzyScoreIsSimilar(t *testing.T) {
 	}
 }
 
+func TestFuzzyScoreIgnoresIdentifierSeparators(t *testing.T) {
+	t.Parallel()
+
+	for _, candidate := range []string{"delta_Handler.go", "deltaHandler.go", "delta-handler.go"} {
+		if _, ok := FuzzyScore(candidate, "delta handler"); !ok {
+			t.Fatalf("FuzzyScore(%q, %q) did not match", candidate, "delta handler")
+		}
+	}
+}
+
+func TestCompactQueryPreservesCaseWhileRemovingSeparators(t *testing.T) {
+	t.Parallel()
+
+	if got := CompactQuery(" Delta_Handler.go "); got != "DeltaHandlergo" {
+		t.Fatalf("CompactQuery = %q, want DeltaHandlergo", got)
+	}
+}
+
+func TestRankSymbolsUsesUnadornedSearchText(t *testing.T) {
+	t.Parallel()
+
+	results := RankSymbols([]Result{
+		{Label: "[function] Other  delta_handler.go:2:1", SearchText: "Other"},
+		{Label: "[function] delta_Handler  other.go:2:1", SearchText: "delta_Handler"},
+	}, "delta handler", 10)
+	if len(results) != 1 || results[0].SearchText != "delta_Handler" {
+		t.Fatalf("RankSymbols = %+v, want only delta_Handler", results)
+	}
+}
+
+func TestRankSymbolsPrefersSemanticKindThenDefinitions(t *testing.T) {
+	t.Parallel()
+
+	results := RankSymbols([]Result{
+		{SearchText: "TargetVariable", SymbolCategory: SymbolCategoryVariable, Reference: ReferenceDefinition},
+		{SearchText: "TargetFunctionUsage", SymbolCategory: SymbolCategoryFunction, Reference: ReferenceReference},
+		{SearchText: "TargetTypeUsage", SymbolCategory: SymbolCategoryType, Reference: ReferenceReference},
+		{SearchText: "TargetFunction", SymbolCategory: SymbolCategoryFunction, Reference: ReferenceDefinition},
+		{SearchText: "TargetType", SymbolCategory: SymbolCategoryType, Reference: ReferenceDefinition},
+	}, "target", 10)
+
+	want := []string{"TargetType", "TargetTypeUsage", "TargetFunction", "TargetFunctionUsage", "TargetVariable"}
+	if len(results) != len(want) {
+		t.Fatalf("RankSymbols returned %d results, want %d: %+v", len(results), len(want), results)
+	}
+	for i, name := range want {
+		if results[i].SearchText != name {
+			t.Fatalf("RankSymbols[%d] = %q, want %q; all=%+v", i, results[i].SearchText, name, results)
+		}
+	}
+}
+
+func TestSymbolScoreIsCaseInsensitiveButPrefersMatchingCase(t *testing.T) {
+	t.Parallel()
+
+	upperScore, ok := SymbolScore("DeltaHandler", "delta handler")
+	if !ok {
+		t.Fatal("delta handler did not match DeltaHandler")
+	}
+	matchingScore, ok := SymbolScore("deltaHandler", "delta handler")
+	if !ok {
+		t.Fatal("delta handler did not match deltaHandler")
+	}
+	if matchingScore <= upperScore {
+		t.Fatalf("case-aligned score %d <= case-insensitive score %d", matchingScore, upperScore)
+	}
+}
+
+func TestQuerySeedUsesLongestIdentifierTerm(t *testing.T) {
+	t.Parallel()
+
+	if got := QuerySeed("delta handler"); got != "handler" {
+		t.Fatalf("QuerySeed = %q, want handler", got)
+	}
+	if got := QuerySeed("delta_Handler"); got != "delta_Handler" {
+		t.Fatalf("underscored QuerySeed = %q, want delta_Handler", got)
+	}
+}
+
+func TestRankGrepResultsScoresRelevanceAndDropsBaselineOnlyRows(t *testing.T) {
+	t.Parallel()
+
+	results := RankGrepResults([]Result{
+		{Location: source.Location{Path: "loose.go", Line: 4, Column: 1}, Preview: "t x a x r x g x e x t", Side: ResultSideCurrent},
+		{Location: source.Location{Path: "exact.go", Line: 2, Column: 6}, Preview: "func Target() {}", Side: ResultSideCurrent},
+		{Location: source.Location{Path: "deleted.go", Line: 1, Column: 1}, Preview: "Target", Side: ResultSideBaseline},
+	}, "target", source.Location{}, nil, nil, 10)
+
+	if len(results) != 2 {
+		t.Fatalf("RankGrepResults = %+v, want two current-side rows", results)
+	}
+	if results[0].Location.Path != "exact.go" || results[0].Group != ResultGroupGrep {
+		t.Fatalf("top grep result = %+v, want exact.go tagged as grep", results[0])
+	}
+	if results[0].Score <= results[1].Score {
+		t.Fatalf("grep scores = %d, %d; want exact match first", results[0].Score, results[1].Score)
+	}
+}
+
 func TestRankTextResultsPrefersChangedHunkThenChangedFile(t *testing.T) {
 	t.Parallel()
 

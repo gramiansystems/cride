@@ -120,7 +120,8 @@ Run `cride --help` for the complete command-line reference.
 | `ctrl+r` | Reload the diff and import edits from `review.md` |
 | `tab` | Toggle full-file context |
 | `zo` / `zc` / `zs` | Expand / collapse context / toggle side-by-side |
-| `ctrl+p` / `/` / `g/` | Open file / search file / search project (literal smart-case; `ctrl+r` regex) |
+| `shift shift` / `ctrl+p` | Search files and symbols by fuzzy name (Ctrl+P is the universal terminal fallback) |
+| `/` / `g/` | Search file / search project (literal smart-case; `ctrl+r` regex) |
 | `gd` / `gr` / `gy` | Definition / references / changed symbols |
 | `?` | Open the categorized command palette |
 
@@ -137,6 +138,17 @@ documents the supported commands and conflict behavior.
 
 Definitions and references have a built-in lexical fallback, accelerated by
 ripgrep when it is available.
+
+Search Everywhere ranks all filename matches before fuzzy workspace-symbol
+matches and updates as you type. Symbol matching is case-insensitive, with a
+ranking bonus for matching case, and ignores separators such as spaces and
+underscores. Symbol rows include their source line; types rank before
+functions, then variables, with definitions before usages within each group.
+Scored project grep matches form the final result group, and also
+provide lexical symbol definitions when no language server result is available.
+Double-Shift is available in terminals that support enhanced keyboard event
+reporting; Ctrl+P opens the same panel in every terminal.
+
 cride starts these language servers lazily when their executable is available:
 
 | Executable | Languages |

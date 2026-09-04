@@ -74,7 +74,7 @@ var Groups = []Group{
 		{"ctrl+s / e", "Save review.md without leaving cride"},
 	}},
 	{"Search & open", []Binding{
-		{"ctrl+p", "Open a file by fuzzy name"},
+		{"shift shift / ctrl+p", "Search files and symbols by fuzzy name (double-Shift needs enhanced terminal keys)"},
 		{"/", "Search within the current file (n/N step; ctrl+w/ctrl+u edit; esc clears)"},
 		{"g/", "Search the project (literal smart-case by default; ctrl+r toggles regex)"},
 		{"tab/shift+tab, ctrl+n/ctrl+p", "Move through project-search results"},

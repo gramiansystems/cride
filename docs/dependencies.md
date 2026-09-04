@@ -35,7 +35,7 @@ target `GOOS`/`GOARCH` pair that will be shipped.
 | `rust-analyzer` | Rust LSP enrichments for `.rs` files | `internal/lsp/config.go`, `internal/lsp/process.go` | Optional, same unavailable/degraded behavior as `gopls`. |
 | `clangd` | C/C++ definitions, references, diagnostics, hover, symbols, and call hierarchy | `internal/lsp/config.go`, `internal/lsp/process.go` | Optional. Uses the project's compilation database when available; C/C++ lexical navigation and vtable-aware outlines remain available without it. |
 | Filesystem event backend | Low-latency live reloads | `github.com/fsnotify/fsnotify`, `internal/diffsource/worktree/watch.go` | If watcher registration fails, the app falls back to the fingerprint poll loop in `internal/app/livewatch.go`. |
-| Terminal capabilities | TUI alternate screen, mouse cell motion, colors, width calculations | Bubble Tea, Lip Gloss, Termenv, Chroma | Poor terminal support affects rendering/input quality, not diff correctness. |
+| Terminal capabilities | TUI alternate screen, mouse cell motion, colors, width calculations, and optional enhanced key events for Double-Shift | Bubble Tea, Lip Gloss, Termenv, Chroma, `x/ansi`, `x/term` | Poor terminal support affects rendering/input quality, not diff correctness; Ctrl+P remains the Search Everywhere fallback. |
 
 Application runtime does not call HTTP APIs or remote services. Network access
 is only a build/development concern when the Go tool downloads modules.
@@ -61,6 +61,8 @@ These are imported by CRIDE code and should remain direct requirements in
 | `github.com/charmbracelet/bubbles` | `v1.0.0` | Comment composer textarea. | Imported directly by `internal/app/comments.go`; keep it direct rather than `// indirect`. |
 | `github.com/charmbracelet/bubbletea` | `v1.3.10` | TUI program loop, commands, messages, key/mouse events. | Core app architecture depends on Bubble Tea message flow. |
 | `github.com/charmbracelet/lipgloss` | `v1.1.0` | Styling, layout, color, and terminal width helpers. | Also drives terminal background detection at startup. |
+| `github.com/charmbracelet/x/ansi` | `v0.11.6` | Enable and restore Kitty keyboard protocol flags. | Double-Shift uses enhanced modifier events when the terminal supports them. |
+| `github.com/charmbracelet/x/term` | `v0.2.2` | Check whether input and output are terminals before enabling enhanced keys. | Keeps redirected input/output free of terminal control sequences. |
 | `github.com/fsnotify/fsnotify` | `v1.10.1` | Recursive worktree and `.git` metadata watching. | Watch limits vary by OS; CRIDE has a polling fallback. |
 | `github.com/mattn/go-runewidth` | `v0.0.19` | Display-width calculations for search/symbol UI. | Important for wide runes and aligned terminal rendering. |
 | `github.com/muesli/reflow` | `v0.3.0` | Wrapping and truncating terminal text. | Used in the main renderer, footer, overlays, and change list. |

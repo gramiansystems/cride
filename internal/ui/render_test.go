@@ -331,6 +331,25 @@ func TestOverlayLinesCanAlignPreviewColumn(t *testing.T) {
 	}
 }
 
+func TestOverlayResultLabelWidthReservesSpaceForPreview(t *testing.T) {
+	t.Parallel()
+
+	lines := overlayLines(Overlay{
+		Title:  "Search everywhere",
+		Prompt: "⇧⇧",
+		Query:  "target",
+		Results: []OverlayResult{{
+			Label:      "[function] Target · a/very/long/path/that/would/otherwise/hide/the/source.go:42",
+			Preview:    "func Target() {}",
+			LabelWidth: 24,
+		}},
+	}, 60, 4)
+	plain := stripANSI(strings.Join(lines, "\n"))
+	if !strings.Contains(plain, "func Target() {}") {
+		t.Fatalf("per-result label width did not preserve preview:\n%s", plain)
+	}
+}
+
 func TestOverlayLinesRenderCategoryTabs(t *testing.T) {
 	t.Parallel()
 
