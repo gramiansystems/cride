@@ -62,6 +62,105 @@ func TestRankFilesPrefersChangedFilesWhenFuzzyScoreIsSimilar(t *testing.T) {
 	}
 }
 
+func TestFuzzyScoreIgnoresIdentifierSeparators(t *testing.T) {
+	t.Parallel()
+
+	for _, candidate := range []string{"xose_Gateway.go", "xoseGateway.go", "xose-gateway.go"} {
+		if _, ok := FuzzyScore(candidate, "xose gateway"); !ok {
+			t.Fatalf("FuzzyScore(%q, %q) did not match", candidate, "xose gateway")
+		}
+	}
+}
+
+func TestCompactQueryPreservesCaseWhileRemovingSeparators(t *testing.T) {
+	t.Parallel()
+
+	if got := CompactQuery(" Xose_Gateway.go "); got != "XoseGatewaygo" {
+		t.Fatalf("CompactQuery = %q, want XoseGatewaygo", got)
+	}
+}
+
+func TestRankSymbolsUsesUnadornedSearchText(t *testing.T) {
+	t.Parallel()
+
+	results := RankSymbols([]Result{
+		{Label: "[function] Other  xose_gateway.go:2:1", SearchText: "Other"},
+		{Label: "[function] xose_Gateway  other.go:2:1", SearchText: "xose_Gateway"},
+	}, "xose gateway", 10)
+	if len(results) != 1 || results[0].SearchText != "xose_Gateway" {
+		t.Fatalf("RankSymbols = %+v, want only xose_Gateway", results)
+	}
+}
+
+func TestRankSymbolsPrefersSemanticKindThenDefinitions(t *testing.T) {
+	t.Parallel()
+
+	results := RankSymbols([]Result{
+		{SearchText: "TargetVariable", SymbolCategory: SymbolCategoryVariable, Reference: ReferenceDefinition},
+		{SearchText: "TargetFunctionUsage", SymbolCategory: SymbolCategoryFunction, Reference: ReferenceReference},
+		{SearchText: "TargetTypeUsage", SymbolCategory: SymbolCategoryType, Reference: ReferenceReference},
+		{SearchText: "TargetFunction", SymbolCategory: SymbolCategoryFunction, Reference: ReferenceDefinition},
+		{SearchText: "TargetType", SymbolCategory: SymbolCategoryType, Reference: ReferenceDefinition},
+	}, "target", 10)
+
+	want := []string{"TargetType", "TargetTypeUsage", "TargetFunction", "TargetFunctionUsage", "TargetVariable"}
+	if len(results) != len(want) {
+		t.Fatalf("RankSymbols returned %d results, want %d: %+v", len(results), len(want), results)
+	}
+	for i, name := range want {
+		if results[i].SearchText != name {
+			t.Fatalf("RankSymbols[%d] = %q, want %q; all=%+v", i, results[i].SearchText, name, results)
+		}
+	}
+}
+
+func TestSymbolScoreIsCaseInsensitiveButPrefersMatchingCase(t *testing.T) {
+	t.Parallel()
+
+	upperScore, ok := SymbolScore("XoseGateway", "xose gateway")
+	if !ok {
+		t.Fatal("xose gateway did not match XoseGateway")
+	}
+	matchingScore, ok := SymbolScore("xoseGateway", "xose gateway")
+	if !ok {
+		t.Fatal("xose gateway did not match xoseGateway")
+	}
+	if matchingScore <= upperScore {
+		t.Fatalf("case-aligned score %d <= case-insensitive score %d", matchingScore, upperScore)
+	}
+}
+
+func TestQuerySeedUsesLongestIdentifierTerm(t *testing.T) {
+	t.Parallel()
+
+	if got := QuerySeed("xose gateway"); got != "gateway" {
+		t.Fatalf("QuerySeed = %q, want gateway", got)
+	}
+	if got := QuerySeed("xose_Gateway"); got != "xose_Gateway" {
+		t.Fatalf("underscored QuerySeed = %q, want xose_Gateway", got)
+	}
+}
+
+func TestRankGrepResultsScoresRelevanceAndDropsBaselineOnlyRows(t *testing.T) {
+	t.Parallel()
+
+	results := RankGrepResults([]Result{
+		{Location: source.Location{Path: "loose.go", Line: 4, Column: 1}, Preview: "t x a x r x g x e x t", Side: ResultSideCurrent},
+		{Location: source.Location{Path: "exact.go", Line: 2, Column: 6}, Preview: "func Target() {}", Side: ResultSideCurrent},
+		{Location: source.Location{Path: "deleted.go", Line: 1, Column: 1}, Preview: "Target", Side: ResultSideBaseline},
+	}, "target", source.Location{}, nil, nil, 10)
+
+	if len(results) != 2 {
+		t.Fatalf("RankGrepResults = %+v, want two current-side rows", results)
+	}
+	if results[0].Location.Path != "exact.go" || results[0].Group != ResultGroupGrep {
+		t.Fatalf("top grep result = %+v, want exact.go tagged as grep", results[0])
+	}
+	if results[0].Score <= results[1].Score {
+		t.Fatalf("grep scores = %d, %d; want exact match first", results[0].Score, results[1].Score)
+	}
+}
+
 func TestRankTextResultsPrefersChangedHunkThenChangedFile(t *testing.T) {
 	t.Parallel()
 

@@ -2,9 +2,11 @@ package app
 
 import (
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -15,6 +17,13 @@ import (
 	"cride/internal/source"
 	"cride/internal/ui"
 )
+
+type testCSIMessage string
+
+func (m testCSIMessage) String() string {
+	sequence := []byte(m)
+	return fmt.Sprintf("?CSI%+v?", sequence[2:])
+}
 
 func TestFileNavigationSwitchesFilesAndRestoresState(t *testing.T) {
 	t.Parallel()
@@ -2229,6 +2238,234 @@ func TestWorkspaceSymbolsRankChangedFilesAndJump(t *testing.T) {
 	}
 }
 
+func TestWorkspaceSymbolsCmdAddsDefinitionAndUsageLinePreviews(t *testing.T) {
+	t.Parallel()
+
+	queries := []string{}
+	cmd := workspaceSymbolsCmd(
+		fakeLSP{workspaceSymbols: []lsp.WorkspaceSymbol{{
+			Name:     "Gateway",
+			Kind:     lsp.SymbolStruct,
+			Location: source.Location{Path: "gateway.go", Line: 2, Column: 6},
+		}}},
+		fakeSource{
+			contents: map[string][]byte{
+				"gateway.go": []byte("package gateway\ntype Gateway struct{}\n"),
+			},
+			searchQueries: &queries,
+			searchResults: []navsearch.Result{
+				{Kind: navsearch.ResultText, Location: source.Location{Path: "gateway.go", Line: 2, Column: 6}, Preview: "type Gateway struct{}", Side: navsearch.ResultSideCurrent},
+				{Kind: navsearch.ResultText, Location: source.Location{Path: "main.go", Line: 8, Column: 8}, Preview: "gateway := Gateway{}", Side: navsearch.ResultSideCurrent},
+			},
+		},
+		7,
+		"gate way",
+		true,
+	)
+	raw := cmd()
+	msg, ok := raw.(workspaceSymbolsLoadedMsg)
+	if !ok {
+		t.Fatalf("workspace symbol message = %T, want workspaceSymbolsLoadedMsg", raw)
+	}
+	if got := msg.results[0].Preview; got != "type Gateway struct{}" {
+		t.Fatalf("definition preview = %q, want source line", got)
+	}
+	if len(queries) != 1 || !strings.Contains(queries[0], "Gateway") {
+		t.Fatalf("usage search queries = %q, want one combined Gateway query", queries)
+	}
+	if len(msg.usages) != 1 {
+		t.Fatalf("usage results = %+v, want one result with the definition deduplicated", msg.usages)
+	}
+	usage := msg.usages[0]
+	if usage.Preview != "gateway := Gateway{}" || usage.Reference != navsearch.ReferenceReference {
+		t.Fatalf("usage result = %+v, want line preview and usage classification", usage)
+	}
+	if usage.SymbolCategory != navsearch.SymbolCategoryType {
+		t.Fatalf("usage category = %v, want type", usage.SymbolCategory)
+	}
+}
+
+func TestWorkspaceSymbolsCmdQueriesCaseVariantsAndDeduplicates(t *testing.T) {
+	t.Parallel()
+
+	queries := []string{}
+	symbol := lsp.WorkspaceSymbol{
+		Name:     "XoseGateway",
+		Kind:     lsp.SymbolClass,
+		Location: source.Location{Path: "gateway.go", Line: 2, Column: 6},
+	}
+	cmd := workspaceSymbolsCmd(fakeLSP{
+		workspaceByQuery: map[string][]lsp.WorkspaceSymbol{
+			"Gateway": {symbol},
+			"GATEWAY": {symbol},
+		},
+		workspaceQueries: &queries,
+	}, fakeSource{}, 8, "xose gateway", false)
+	raw := cmd()
+	msg, ok := raw.(workspaceSymbolsLoadedMsg)
+	if !ok {
+		t.Fatalf("workspace symbol message = %T, want workspaceSymbolsLoadedMsg", raw)
+	}
+	if got, want := strings.Join(queries, ","), "gateway,Gateway,GATEWAY"; got != want {
+		t.Fatalf("workspace queries = %q, want %q", got, want)
+	}
+	if len(msg.results) != 1 || msg.results[0].Name != "XoseGateway" {
+		t.Fatalf("merged workspace results = %+v, want one XoseGateway", msg.results)
+	}
+}
+
+func TestNavigateGrepAddsLexicalSymbolsWithoutLSP(t *testing.T) {
+	t.Parallel()
+
+	queries := []string{}
+	cmd := navigateGrepCmd(fakeSource{
+		contents: map[string][]byte{
+			"gateway.go": []byte("package gateway\nfunc XoseGateway() {}\n"),
+		},
+		textSearchQueries: &queries,
+		searchResults: []navsearch.Result{{
+			Kind:     navsearch.ResultText,
+			Location: source.Location{Path: "gateway.go", Line: 2, Column: 6},
+			Preview:  "func XoseGateway() {}",
+			Side:     navsearch.ResultSideCurrent,
+		}},
+	}, 9, "xose gateway")
+	raw := cmd()
+	msg, ok := raw.(navigateGrepLoadedMsg)
+	if !ok {
+		t.Fatalf("navigate grep message = %T, want navigateGrepLoadedMsg", raw)
+	}
+	if len(queries) != 1 || queries[0] != "gateway" {
+		t.Fatalf("grep seed queries = %q, want gateway", queries)
+	}
+	if len(msg.symbols) != 1 || msg.symbols[0].Name != "XoseGateway" {
+		t.Fatalf("lexical symbols = %+v, want XoseGateway", msg.symbols)
+	}
+	if msg.symbols[0].Preview != "func XoseGateway() {}" {
+		t.Fatalf("lexical symbol preview = %q, want source line", msg.symbols[0].Preview)
+	}
+}
+
+func TestNavigateResultsGroupFilesSymbolsThenScoredGrep(t *testing.T) {
+	t.Parallel()
+
+	m := Model{
+		projectFiles: []string{"target.go", "other.go"},
+		overlay: overlayState{
+			Kind:  OverlayNavigate,
+			Query: "target",
+			RawResults: []navsearch.Result{{
+				Kind:           navsearch.ResultText,
+				Group:          navsearch.ResultGroupSymbol,
+				Location:       source.Location{Path: "symbols.go", Line: 3, Column: 6},
+				Label:          "[function] Target",
+				SearchText:     "Target",
+				Preview:        "func Target() {}",
+				SymbolCategory: navsearch.SymbolCategoryFunction,
+				Reference:      navsearch.ReferenceDefinition,
+			}},
+			NavigateGrep: []navsearch.Result{{
+				Kind:     navsearch.ResultText,
+				Location: source.Location{Path: "main.go", Line: 8, Column: 2},
+				Preview:  "Target()",
+				Side:     navsearch.ResultSideCurrent,
+			}},
+		},
+		width:  100,
+		height: 24,
+	}
+	m.refreshNavigateResults()
+	if len(m.overlay.Results) != 3 {
+		t.Fatalf("navigate results = %+v, want file, symbol, and grep", m.overlay.Results)
+	}
+	if m.overlay.Results[0].Kind != navsearch.ResultFile || m.overlay.Results[1].Group != navsearch.ResultGroupSymbol || m.overlay.Results[2].Group != navsearch.ResultGroupGrep {
+		t.Fatalf("navigate grouping = %+v, want file then symbol then grep", m.overlay.Results)
+	}
+	view := m.overlayView()
+	if view.Results[1].LabelWidth == 0 || view.Results[1].Preview != "func Target() {}" {
+		t.Fatalf("symbol row = %+v, want reserved source-line preview", view.Results[1])
+	}
+}
+
+func TestNavigateOverlayKeepsFileMatchesAheadOfFuzzySymbols(t *testing.T) {
+	t.Parallel()
+
+	m := Model{
+		projectFiles: []string{"pkg/xose_Gateway.go", "pkg/other.go"},
+		fileContents: make(map[string]fileContentState),
+		width:        100,
+		height:       24,
+	}
+	m.openNavigateOverlay()
+	if view := m.overlayView(); !view.FullHeight {
+		t.Fatal("navigate overlay is not full height")
+	}
+	next, _ := m.updateOverlayQuery("xose gateway")
+	m = next.(Model)
+	if len(m.overlay.Results) != 1 || m.overlay.Results[0].Location.Path != "pkg/xose_Gateway.go" {
+		t.Fatalf("immediate file results = %+v, want xose_Gateway.go", m.overlay.Results)
+	}
+
+	next, _ = m.Update(workspaceSymbolsLoadedMsg{
+		generation: m.overlay.Generation,
+		query:      "xose gateway",
+		results: []lsp.WorkspaceSymbol{{
+			Name:     "xose_Gateway",
+			Kind:     lsp.SymbolFunction,
+			Location: source.Location{Path: "pkg/gateway.go", Line: 12, Column: 6},
+			Preview:  "func xose_Gateway() {}",
+		}},
+	})
+	m = next.(Model)
+	if len(m.overlay.Results) != 2 {
+		t.Fatalf("combined results = %+v, want file and symbol", m.overlay.Results)
+	}
+	if m.overlay.Results[0].Kind != navsearch.ResultFile || m.overlay.Results[1].SearchText != "xose_Gateway" {
+		t.Fatalf("combined result order = %+v, want file before symbol", m.overlay.Results)
+	}
+	if got := m.overlay.Results[1].Preview; got != "func xose_Gateway() {}" {
+		t.Fatalf("symbol preview = %q, want matched source line", got)
+	}
+}
+
+func TestCtrlPOpensNavigateOverlay(t *testing.T) {
+	t.Parallel()
+
+	m := Model{projectFiles: []string{}}
+	next, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlP})
+	if got := next.(Model).overlay.Kind; got != OverlayNavigate {
+		t.Fatalf("ctrl+p overlay = %v, want OverlayNavigate", got)
+	}
+}
+
+func TestDoubleShiftOpensNavigateOverlay(t *testing.T) {
+	t.Parallel()
+
+	m := Model{
+		projectFiles:   []string{},
+		lastShiftPress: time.Now(),
+	}
+	next, _ := m.Update(testCSIMessage("\x1b[57441;2:1u"))
+	got := next.(Model)
+	if got.overlay.Kind != OverlayNavigate {
+		t.Fatalf("overlay kind = %v, want OverlayNavigate", got.overlay.Kind)
+	}
+}
+
+func TestKittyShiftEventParsingIgnoresRepeatAndRecognizesRelease(t *testing.T) {
+	t.Parallel()
+
+	if got := kittyShiftEventFromCSI("\x1b[57447;2u"); got != kittyShiftPress {
+		t.Fatalf("press event = %v, want press", got)
+	}
+	if got := kittyShiftEventFromCSI("\x1b[57441;2:2u"); got != kittyShiftRepeat {
+		t.Fatalf("repeat event = %v, want repeat", got)
+	}
+	if got := kittyShiftEventFromCSI("\x1b[57441;1:3u"); got != kittyShiftRelease {
+		t.Fatalf("release event = %v, want release", got)
+	}
+}
+
 func TestWorkspaceSymbolsGainContainedChangeMarkersFromOutline(t *testing.T) {
 	t.Parallel()
 	file := testFileWithAddedLine("changed.go", 3)
@@ -2623,6 +2860,8 @@ type fakeLSP struct {
 	hover                lsp.Hover
 	documentSymbols      []lsp.DocumentSymbol
 	workspaceSymbols     []lsp.WorkspaceSymbol
+	workspaceByQuery     map[string][]lsp.WorkspaceSymbol
+	workspaceQueries     *[]string
 	calls                []lsp.CallHierarchyCall
 	err                  error
 }
@@ -2661,6 +2900,12 @@ func (c fakeLSP) DocumentSymbols(path string) ([]lsp.DocumentSymbol, lsp.Status,
 }
 
 func (c fakeLSP) WorkspaceSymbols(query string) ([]lsp.WorkspaceSymbol, lsp.Status, error) {
+	if c.workspaceQueries != nil {
+		*c.workspaceQueries = append(*c.workspaceQueries, query)
+	}
+	if c.workspaceByQuery != nil {
+		return c.workspaceByQuery[query], c.Status(""), c.err
+	}
 	return c.workspaceSymbols, c.Status(""), c.err
 }
 

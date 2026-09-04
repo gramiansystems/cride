@@ -40,6 +40,7 @@ const (
 	OverlayFileOpen
 	OverlaySearch
 	OverlayWorkspaceSymbol
+	OverlayNavigate
 	OverlaySymbolChoice
 	OverlayCommandPalette
 )
@@ -75,10 +76,13 @@ const (
 )
 
 const (
-	searchDebounceDelay = 150 * time.Millisecond
-	overlayResultLimit  = 80
-	localExpansionStep  = 10
-	commandNameWidth    = 34
+	searchDebounceDelay      = 150 * time.Millisecond
+	doubleShiftDelay         = 500 * time.Millisecond
+	overlayResultLimit       = 80
+	navigateUsageSymbolLimit = 12
+	navigateLexicalFileLimit = 24
+	localExpansionStep       = 10
+	commandNameWidth         = 34
 )
 
 // Model holds all UI state. Messages are the only way to mutate it.
@@ -153,6 +157,7 @@ type Model struct {
 	pendingBracket int  // +1 after ], -1 after [; 0 when idle
 	pendingFind    byte // f/F/t/T awaiting a target rune; 0 when idle
 	lastFind       findMotion
+	lastShiftPress time.Time
 
 	mode            editorMode
 	editPrevView    ViewMode // view restored when editing ends
@@ -240,6 +245,10 @@ type overlayState struct {
 	PendingReferenceChanged bool
 	SearchRegex             bool
 	QuerySelected           bool
+	SymbolLoading           bool
+	GrepLoading             bool
+	NavigateSymbols         []navsearch.Result
+	NavigateGrep            []navsearch.Result
 }
 
 type projectSearchMemo struct {
@@ -466,8 +475,90 @@ type workspaceSymbolsLoadedMsg struct {
 	generation int
 	query      string
 	results    []lsp.WorkspaceSymbol
+	usages     []navsearch.Result
 	status     lsp.Status
 	err        error
+}
+
+type navigateGrepLoadedMsg struct {
+	generation int
+	query      string
+	symbols    []lsp.WorkspaceSymbol
+	results    []navsearch.Result
+	err        error
+}
+
+type kittyShiftEvent uint8
+
+const (
+	kittyShiftNone kittyShiftEvent = iota
+	kittyShiftPress
+	kittyShiftRepeat
+	kittyShiftRelease
+)
+
+// kittyShiftEventFromMessage recognizes the private unknown-CSI message
+// emitted by Bubble Tea v1 for Kitty keyboard protocol events. Requesting only
+// event-type reporting keeps ordinary keys on their legacy encodings while
+// making bare modifier presses observable in supporting terminals.
+func kittyShiftEventFromMessage(msg tea.Msg) kittyShiftEvent {
+	stringer, ok := msg.(interface{ String() string })
+	if !ok {
+		return kittyShiftNone
+	}
+	encoded := stringer.String()
+	if !strings.HasPrefix(encoded, "?CSI[") || !strings.HasSuffix(encoded, "]?") {
+		return kittyShiftNone
+	}
+
+	fields := strings.Fields(strings.TrimSuffix(strings.TrimPrefix(encoded, "?CSI["), "]?"))
+	bytes := make([]byte, 0, len(fields)+2)
+	bytes = append(bytes, '\x1b', '[')
+	for _, field := range fields {
+		value, err := strconv.Atoi(field)
+		if err != nil || value < 0 || value > 255 {
+			return kittyShiftNone
+		}
+		bytes = append(bytes, byte(value))
+	}
+	return kittyShiftEventFromCSI(string(bytes))
+}
+
+func kittyShiftEventFromCSI(sequence string) kittyShiftEvent {
+	if !strings.HasPrefix(sequence, "\x1b[") || !strings.HasSuffix(sequence, "u") {
+		return kittyShiftNone
+	}
+	params := strings.Split(strings.TrimSuffix(strings.TrimPrefix(sequence, "\x1b["), "u"), ";")
+	if len(params) == 0 {
+		return kittyShiftNone
+	}
+	codeText := strings.SplitN(params[0], ":", 2)[0]
+	code, err := strconv.Atoi(codeText)
+	if err != nil || (code != 57441 && code != 57447) { // Kitty left/right Shift
+		return kittyShiftNone
+	}
+
+	eventType := 1
+	if len(params) > 1 {
+		modifierParts := strings.Split(params[1], ":")
+		if len(modifierParts) > 1 && modifierParts[1] != "" {
+			parsed, err := strconv.Atoi(modifierParts[1])
+			if err != nil {
+				return kittyShiftNone
+			}
+			eventType = parsed
+		}
+	}
+	switch eventType {
+	case 1:
+		return kittyShiftPress
+	case 2:
+		return kittyShiftRepeat
+	case 3:
+		return kittyShiftRelease
+	default:
+		return kittyShiftNone
+	}
 }
 
 // loadCmdSeq computes and parses the review diff off the UI goroutine. The
@@ -526,7 +617,7 @@ func (m *Model) loadProjectFilesCmd() tea.Cmd {
 	src := m.source
 	m.projectFilesLoading = true
 	m.projectFilesErr = nil
-	if m.overlay.Kind == OverlayFileOpen {
+	if m.overlay.Kind == OverlayFileOpen || m.overlay.Kind == OverlayNavigate {
 		m.overlay.Loading = true
 		m.overlay.Err = nil
 	}
@@ -660,6 +751,159 @@ func searchCmd(src diffsource.Source, generation int, query string, regex bool) 
 		}
 		return searchLoadedMsg{generation: generation, query: query, regex: regex, results: results, err: err}
 	}
+}
+
+func navigateGrepCmd(src diffsource.Source, generation int, query string) tea.Cmd {
+	return func() tea.Msg {
+		if src == nil {
+			return navigateGrepLoadedMsg{generation: generation, query: query, err: errors.New("source unavailable")}
+		}
+		seed := navsearch.QuerySeed(query)
+		if len([]rune(seed)) < 2 {
+			return navigateGrepLoadedMsg{generation: generation, query: query}
+		}
+		var (
+			results []navsearch.Result
+			err     error
+		)
+		if textSearcher, ok := src.(diffsource.TextSearcher); ok {
+			results, err = textSearcher.SearchText(seed)
+		} else {
+			results, err = src.Search(regexp.QuoteMeta(seed))
+		}
+		if err != nil {
+			return navigateGrepLoadedMsg{generation: generation, query: query, err: err}
+		}
+		return navigateGrepLoadedMsg{
+			generation: generation,
+			query:      query,
+			symbols:    lexicalWorkspaceSymbolsFromGrep(src, results, query, navigateLexicalFileLimit),
+			results:    results,
+		}
+	}
+}
+
+func lexicalWorkspaceSymbolsFromGrep(src diffsource.Source, results []navsearch.Result, query string, fileLimit int) []lsp.WorkspaceSymbol {
+	if src == nil || fileLimit <= 0 {
+		return nil
+	}
+	type pathCandidate struct {
+		path  string
+		score int
+	}
+	pathScores := make(map[string]int)
+	for _, result := range results {
+		if result.Side == navsearch.ResultSideBaseline || result.Location.Path == "" {
+			continue
+		}
+		score, ok := navsearch.GrepRelevanceScore(result, query)
+		if ok && score > pathScores[result.Location.Path] {
+			pathScores[result.Location.Path] = score
+		}
+	}
+	paths := make([]pathCandidate, 0, len(pathScores))
+	for path, score := range pathScores {
+		paths = append(paths, pathCandidate{path: path, score: score})
+	}
+	sort.SliceStable(paths, func(i, j int) bool {
+		if paths[i].score != paths[j].score {
+			return paths[i].score > paths[j].score
+		}
+		return paths[i].path < paths[j].path
+	})
+	if len(paths) > fileLimit {
+		paths = paths[:fileLimit]
+	}
+
+	var symbols []lsp.WorkspaceSymbol
+	seen := make(map[string]bool)
+	for _, candidate := range paths {
+		content, err := src.CurrentContent(candidate.path)
+		if err != nil {
+			continue
+		}
+		lines := splitContentLines(content)
+		documentSymbols, _ := (outline.LexicalExtractor{}).Symbols(candidate.path, content)
+		for _, symbol := range lsp.FlattenDocumentSymbols(documentSymbols) {
+			if _, ok := navsearch.SymbolScore(symbol.Name, query); !ok {
+				continue
+			}
+			loc := symbol.SelectionRange.Start
+			if loc.Line < 1 {
+				loc = symbol.Range.Start
+			}
+			key := workspaceSymbolLocationKey(symbol.Name, loc)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			preview := ""
+			if loc.Line > 0 && loc.Line <= len(lines) {
+				preview = strings.TrimSpace(lines[loc.Line-1])
+			}
+			symbols = append(symbols, lsp.WorkspaceSymbol{
+				Name:          symbol.Name,
+				Kind:          symbol.Kind,
+				Location:      loc,
+				ContainerName: symbol.ContainerName,
+				Preview:       preview,
+			})
+		}
+	}
+
+	// Outline extractors intentionally omit many local variables. Promote
+	// declaration-looking grep lines as variable/type/function definitions so
+	// symbol navigation still degrades usefully without a language server.
+	for _, result := range results {
+		if result.Side == navsearch.ResultSideBaseline {
+			continue
+		}
+		for _, identifier := range navsearch.NonKeywordIdentifiers(result.Preview) {
+			if _, ok := navsearch.SymbolScore(identifier.Symbol, query); !ok || !navsearch.LooksLikeDefinition(result.Preview, result.Location.Path, identifier.Symbol) {
+				continue
+			}
+			loc := result.Location
+			loc.Column = identifier.Column
+			key := workspaceSymbolLocationKey(identifier.Symbol, loc)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			symbols = append(symbols, lsp.WorkspaceSymbol{
+				Name:     identifier.Symbol,
+				Kind:     lexicalDefinitionKind(result.Preview, identifier.Symbol),
+				Location: loc,
+				Preview:  strings.TrimSpace(result.Preview),
+			})
+			if len(symbols) >= overlayResultLimit*2 {
+				return symbols
+			}
+		}
+	}
+	return symbols
+}
+
+func lexicalDefinitionKind(line, symbol string) lsp.SymbolKind {
+	quoted := regexp.QuoteMeta(symbol)
+	for _, candidate := range []struct {
+		pattern string
+		kind    lsp.SymbolKind
+	}{
+		{`\bstruct[[:space:]]+` + quoted + `\b`, lsp.SymbolStruct},
+		{`\bclass[[:space:]]+` + quoted + `\b`, lsp.SymbolClass},
+		{`\binterface[[:space:]]+` + quoted + `\b`, lsp.SymbolInterface},
+		{`\benum[[:space:]]+(class[[:space:]]+)?` + quoted + `\b`, lsp.SymbolEnum},
+		{`\btype[[:space:]]+` + quoted + `\b`, lsp.SymbolClass},
+		{`\b(func|function|def|fn)[^;{}]*\b` + quoted + `\b`, lsp.SymbolFunction},
+	} {
+		if matched, _ := regexp.MatchString(candidate.pattern, line); matched {
+			return candidate.kind
+		}
+	}
+	if matched, _ := regexp.MatchString(`\b`+quoted+`[[:space:]]*\(`, line); matched {
+		return lsp.SymbolFunction
+	}
+	return lsp.SymbolVariable
 }
 
 func referenceSearchCmd(src diffsource.Source, client lsp.Client, generation int, kind referenceRequestKind, query navsearch.SymbolQuery) tea.Cmd {
@@ -973,19 +1217,252 @@ func sameDocumentSymbol(a, b lsp.DocumentSymbol) bool {
 	return aLoc.Path == bLoc.Path && aLoc.Line == bLoc.Line && aLoc.Column == bLoc.Column
 }
 
-func workspaceSymbolsCmd(client lsp.Client, generation int, query string) tea.Cmd {
+func workspaceSymbolBackendQueries(query string) []string {
+	seed := navsearch.QuerySeed(query)
+	if seed == "" {
+		seed = navsearch.CompactQuery(query)
+	}
+	if seed == "" {
+		seed = query
+	}
+	seen := make(map[string]bool)
+	queries := make([]string, 0, 4)
+	add := func(candidate string) {
+		if candidate == "" || seen[candidate] {
+			return
+		}
+		seen[candidate] = true
+		queries = append(queries, candidate)
+	}
+	add(seed)
+	lower := strings.ToLower(seed)
+	add(lower)
+	runes := []rune(lower)
+	if len(runes) > 0 {
+		add(strings.ToUpper(string(runes[0])) + string(runes[1:]))
+	}
+	add(strings.ToUpper(seed))
+	return queries
+}
+
+func caseInsensitiveWorkspaceSymbols(client lsp.Client, query string) ([]lsp.WorkspaceSymbol, lsp.Status, error) {
+	var (
+		results []lsp.WorkspaceSymbol
+		status  lsp.Status
+	)
+	seen := make(map[string]bool)
+	for i, backendQuery := range workspaceSymbolBackendQueries(query) {
+		batch, batchStatus, err := client.WorkspaceSymbols(backendQuery)
+		if i == 0 {
+			status = batchStatus
+			if err != nil {
+				return nil, status, err
+			}
+		} else if err != nil {
+			continue
+		}
+		if !status.Enabled() && batchStatus.Enabled() {
+			status = batchStatus
+		}
+		for _, symbol := range batch {
+			loc := symbol.Location
+			key := symbol.Name + "\x00" + strconv.Itoa(int(symbol.Kind)) + "\x00" + loc.Path + "\x00" + strconv.Itoa(loc.Line) + "\x00" + strconv.Itoa(loc.Column)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			results = append(results, symbol)
+		}
+	}
+	return results, status, nil
+}
+
+func workspaceSymbolsCmd(client lsp.Client, src diffsource.Source, generation int, query string, includeUsages bool) tea.Cmd {
 	if client == nil {
 		client = lsp.NewUnavailableClient(lsp.Config{})
 	}
 	return func() tea.Msg {
-		results, status, err := client.WorkspaceSymbols(query)
+		results, status, err := caseInsensitiveWorkspaceSymbols(client, query)
+		if err == nil {
+			enrichWorkspaceSymbolPreviews(src, results)
+		}
+		var usages []navsearch.Result
+		if err == nil && includeUsages && len([]rune(navsearch.CompactQuery(query))) >= 2 {
+			// Usages are an optional lexical enrichment. A search failure must
+			// not hide the authoritative definitions returned by the LSP.
+			usages, _ = workspaceSymbolUsageResults(src, results, query, navigateUsageSymbolLimit)
+		}
 		return workspaceSymbolsLoadedMsg{
 			generation: generation,
 			query:      query,
 			results:    results,
+			usages:     usages,
 			status:     status,
 			err:        err,
 		}
+	}
+}
+
+func enrichWorkspaceSymbolPreviews(src diffsource.Source, symbols []lsp.WorkspaceSymbol) {
+	if src == nil {
+		return
+	}
+	type cachedLines struct {
+		lines []string
+		ok    bool
+	}
+	cache := make(map[string]cachedLines)
+	for i := range symbols {
+		loc := symbols[i].Location
+		if loc.Path == "" || loc.Line < 1 {
+			continue
+		}
+		cached, found := cache[loc.Path]
+		if !found {
+			content, err := src.CurrentContent(loc.Path)
+			cached = cachedLines{ok: err == nil}
+			if err == nil {
+				cached.lines = splitContentLines(content)
+			}
+			cache[loc.Path] = cached
+		}
+		if cached.ok && loc.Line <= len(cached.lines) {
+			symbols[i].Preview = strings.TrimSpace(cached.lines[loc.Line-1])
+		}
+	}
+}
+
+type workspaceSymbolCandidate struct {
+	name     string
+	kind     lsp.SymbolKind
+	category navsearch.SymbolCategory
+	score    int
+}
+
+func workspaceSymbolUsageResults(src diffsource.Source, symbols []lsp.WorkspaceSymbol, query string, limit int) ([]navsearch.Result, error) {
+	if src == nil || limit <= 0 || len(symbols) == 0 {
+		return nil, nil
+	}
+
+	byName := make(map[string]workspaceSymbolCandidate)
+	definitions := make(map[string]bool)
+	for _, symbol := range symbols {
+		identifiers := navsearch.NonKeywordIdentifiers(symbol.Name)
+		if len(identifiers) != 1 || identifiers[0].Symbol != symbol.Name || identifiers[0].Column != 1 {
+			continue
+		}
+		fuzzyScore, ok := navsearch.SymbolScore(symbol.Name, query)
+		if !ok {
+			continue
+		}
+		candidate := workspaceSymbolCandidate{
+			name:     symbol.Name,
+			kind:     symbol.Kind,
+			category: workspaceSymbolCategory(symbol.Kind),
+			score:    fuzzyScore + max(0, min(symbol.Score, 100)),
+		}
+		current, exists := byName[symbol.Name]
+		if !exists || candidate.category > current.category || (candidate.category == current.category && candidate.score > current.score) {
+			byName[symbol.Name] = candidate
+		}
+		definitions[workspaceSymbolLocationKey(symbol.Name, symbol.Location)] = true
+	}
+	if len(byName) == 0 {
+		return nil, nil
+	}
+
+	candidates := make([]workspaceSymbolCandidate, 0, len(byName))
+	for _, candidate := range byName {
+		candidates = append(candidates, candidate)
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		if candidates[i].category != candidates[j].category {
+			return candidates[i].category > candidates[j].category
+		}
+		if candidates[i].score != candidates[j].score {
+			return candidates[i].score > candidates[j].score
+		}
+		return strings.ToLower(candidates[i].name) < strings.ToLower(candidates[j].name)
+	})
+	if len(candidates) > limit {
+		candidates = candidates[:limit]
+	}
+
+	patterns := make([]string, 0, len(candidates))
+	selected := make(map[string]workspaceSymbolCandidate, len(candidates))
+	for _, candidate := range candidates {
+		patterns = append(patterns, regexp.QuoteMeta(candidate.name))
+		selected[candidate.name] = candidate
+	}
+	matches, err := src.Search(`\b(` + strings.Join(patterns, "|") + `)\b`)
+	if err != nil {
+		return nil, err
+	}
+
+	results := make([]navsearch.Result, 0, min(len(matches), overlayResultLimit*4))
+	seen := make(map[string]bool)
+	for _, match := range matches {
+		if match.Side == navsearch.ResultSideBaseline {
+			continue
+		}
+		for _, identifier := range navsearch.NonKeywordIdentifiers(match.Preview) {
+			candidate, ok := selected[identifier.Symbol]
+			if !ok {
+				continue
+			}
+			loc := match.Location
+			loc.Column = identifier.Column
+			if definitions[workspaceSymbolLocationKey(candidate.name, loc)] {
+				continue
+			}
+			reference := navsearch.ClassifyReferenceKind(match.Preview, loc.Path, candidate.name)
+			key := workspaceSymbolLocationKey(candidate.name, loc) + "\x00" + strconv.Itoa(int(reference))
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			results = append(results, navsearch.Result{
+				Kind:           navsearch.ResultText,
+				Group:          navsearch.ResultGroupSymbol,
+				Location:       loc,
+				Label:          workspaceSymbolMatchLabel(candidate.name, candidate.kind, reference, loc),
+				SearchText:     candidate.name,
+				Preview:        strings.TrimSpace(match.Preview),
+				Score:          candidate.score,
+				Side:           match.Side,
+				SymbolCategory: candidate.category,
+				Reference:      reference,
+			})
+			if len(results) >= overlayResultLimit*4 {
+				return results, nil
+			}
+		}
+	}
+	return results, nil
+}
+
+func workspaceSymbolLocationKey(name string, loc source.Location) string {
+	return name + "\x00" + loc.Path + "\x00" + strconv.Itoa(loc.Line)
+}
+
+func workspaceSymbolMatchLabel(name string, kind lsp.SymbolKind, reference navsearch.ReferenceKind, loc source.Location) string {
+	role := "usage"
+	if reference == navsearch.ReferenceDefinition {
+		role = "definition"
+	}
+	return "[" + kind.String() + " " + role + "] " + name + "  " + loc.Path + ":" + strconv.Itoa(max(1, loc.Line)) + ":" + strconv.Itoa(max(1, loc.Column))
+}
+
+func workspaceSymbolCategory(kind lsp.SymbolKind) navsearch.SymbolCategory {
+	switch kind {
+	case lsp.SymbolClass, lsp.SymbolStruct, lsp.SymbolInterface, lsp.SymbolEnum, lsp.SymbolTypeParameter:
+		return navsearch.SymbolCategoryType
+	case lsp.SymbolFunction, lsp.SymbolMethod, lsp.SymbolConstructor, lsp.SymbolOperator:
+		return navsearch.SymbolCategoryFunction
+	case lsp.SymbolVariable, lsp.SymbolConstant, lsp.SymbolProperty, lsp.SymbolField, lsp.SymbolEnumMember, lsp.SymbolObject, lsp.SymbolKey:
+		return navsearch.SymbolCategoryVariable
+	default:
+		return navsearch.SymbolCategoryOther
 	}
 }
 
@@ -1043,6 +1520,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if event := kittyShiftEventFromMessage(msg); event != kittyShiftNone {
+		if event != kittyShiftPress || m.overlay.Kind != OverlayNone || m.mode != modeReview || m.composer.open {
+			return m, nil
+		}
+		now := time.Now()
+		if !m.lastShiftPress.IsZero() && now.Sub(m.lastShiftPress) <= doubleShiftDelay {
+			m.lastShiftPress = time.Time{}
+			return m, m.openNavigateOverlay()
+		}
+		m.lastShiftPress = now
+		return m, nil
+	}
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -1270,6 +1760,8 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.overlay.Kind == OverlayFileOpen {
 			m.refreshFileOpenResults()
+		} else if m.overlay.Kind == OverlayNavigate {
+			m.refreshNavigateResults()
 		}
 		if m.includeAllFiles {
 			announce := m.announceAllFiles
@@ -1368,43 +1860,87 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.enrichmentPanel.Open && m.enrichmentPanel.Kind == enrichmentPanelOutlineDiff {
 			m.refreshOutlinePanel()
 		}
-		if m.overlay.Kind == OverlayWorkspaceSymbol {
+		if m.overlay.Kind == OverlayWorkspaceSymbol || m.overlay.Kind == OverlayNavigate {
 			for i := range m.overlay.RawResults {
 				m.overlay.RawResults[i].Review = m.reviewWithOutlineChange(m.overlay.RawResults[i].Location, "", 0, m.overlay.RawResults[i].Review)
 			}
-			m.overlay.Results = m.rankOverlayResults(m.overlay.RawResults)
+			if m.overlay.Kind == OverlayNavigate {
+				m.refreshNavigateResults()
+			} else {
+				m.overlay.Results = m.rankOverlayResults(m.overlay.RawResults)
+			}
 			m.clampOverlayCursor()
 		}
 		m.clampScroll()
 		return m, nil
 
 	case workspaceSymbolDebounceMsg:
-		if m.overlay.Kind != OverlayWorkspaceSymbol || msg.generation != m.overlay.Generation || msg.query != m.overlay.Query {
+		if (m.overlay.Kind != OverlayWorkspaceSymbol && m.overlay.Kind != OverlayNavigate) || msg.generation != m.overlay.Generation || msg.query != m.overlay.Query {
 			return m, nil
 		}
-		return m, workspaceSymbolsCmd(m.lsp, msg.generation, msg.query)
+		if m.overlay.Kind == OverlayNavigate {
+			return m, tea.Batch(
+				workspaceSymbolsCmd(m.lsp, m.source, msg.generation, msg.query, true),
+				navigateGrepCmd(m.source, msg.generation, msg.query),
+			)
+		}
+		return m, workspaceSymbolsCmd(m.lsp, m.source, msg.generation, msg.query, false)
 
 	case workspaceSymbolsLoadedMsg:
 		m.recordLSPStatus(msg.status)
-		if m.overlay.Kind != OverlayWorkspaceSymbol || msg.generation != m.overlay.Generation || msg.query != m.overlay.Query {
+		if (m.overlay.Kind != OverlayWorkspaceSymbol && m.overlay.Kind != OverlayNavigate) || msg.generation != m.overlay.Generation || msg.query != m.overlay.Query {
 			return m, nil
 		}
-		m.overlay.Loading = false
+		m.overlay.SymbolLoading = false
+		if m.overlay.Kind == OverlayWorkspaceSymbol {
+			m.overlay.Loading = false
+		}
 		m.overlay.Err = msg.err
+		if m.overlay.Kind == OverlayNavigate && msg.err != nil {
+			// Symbols enrich Search Everywhere but file navigation remains
+			// fully usable without a configured/running language server.
+			m.overlay.Err = nil
+		}
 		if msg.err != nil {
-			m.overlay.Results = nil
 			m.overlay.RawResults = nil
+			if m.overlay.Kind == OverlayNavigate {
+				m.refreshNavigateResults()
+			} else {
+				m.overlay.Results = nil
+			}
 		} else {
 			m.overlay.RawResults = m.workspaceSymbolOverlayRawResults(msg.results)
-			m.overlay.Results = m.rankOverlayResults(m.overlay.RawResults)
+			if m.overlay.Kind == OverlayNavigate {
+				m.overlay.RawResults = append(m.overlay.RawResults, m.workspaceSymbolUsageRawResults(msg.usages)...)
+				m.refreshNavigateResults()
+			} else {
+				m.overlay.Results = m.rankOverlayResults(m.overlay.RawResults)
+			}
 		}
 		m.clampOverlayCursor()
 		return m, nil
 
+	case navigateGrepLoadedMsg:
+		if m.overlay.Kind != OverlayNavigate || msg.generation != m.overlay.Generation || msg.query != m.overlay.Query {
+			return m, nil
+		}
+		m.overlay.GrepLoading = false
+		if msg.err != nil {
+			m.overlay.NavigateSymbols = nil
+			m.overlay.NavigateGrep = nil
+		} else {
+			m.overlay.NavigateSymbols = m.workspaceSymbolOverlayRawResults(msg.symbols)
+			m.overlay.NavigateGrep = msg.results
+		}
+		m.refreshNavigateResults()
+		return m, nil
+
 	case tea.KeyMsg:
+		m.lastShiftPress = time.Time{}
 		return m.handleKey(msg)
 
 	case tea.MouseMsg:
+		m.lastShiftPress = time.Time{}
 		return m.handleMouse(msg)
 	}
 	if m.composer.open {
@@ -2175,6 +2711,22 @@ func (m *Model) openWorkspaceSymbolOverlay() {
 	m.overlay = overlayState{Kind: OverlayWorkspaceSymbol, Generation: m.searchGeneration, Order: diff.ResultOrderReview}
 }
 
+func (m *Model) openNavigateOverlay() tea.Cmd {
+	m.countBuf = ""
+	m.pendingG = false
+	m.pendingZ = false
+	m.pendingBracket = 0
+	m.searchGeneration++
+	m.referencePanel = referencePanelState{}
+	m.enrichmentPanel = enrichmentPanelState{}
+	m.overlay = overlayState{
+		Kind:       OverlayNavigate,
+		Generation: m.searchGeneration,
+	}
+	m.refreshNavigateResults()
+	return m.loadProjectFilesCmd()
+}
+
 func (m *Model) openCommandPalette() {
 	m.startCommandPalette()
 	results := commandPaletteResults(m.overlay.CommandCategory, "")
@@ -2375,6 +2927,21 @@ func (m Model) updateOverlayQuery(query string) (tea.Model, tea.Cmd) {
 	case OverlayFileOpen:
 		m.refreshFileOpenResults()
 		return m, nil
+	case OverlayNavigate:
+		m.searchGeneration++
+		m.overlay.Generation = m.searchGeneration
+		m.overlay.RawResults = nil
+		m.overlay.NavigateSymbols = nil
+		m.overlay.NavigateGrep = nil
+		m.overlay.SymbolLoading = query != ""
+		m.overlay.GrepLoading = query != ""
+		m.refreshNavigateResults()
+		if query == "" {
+			return m, nil
+		}
+		return m, tea.Tick(searchDebounceDelay, func(time.Time) tea.Msg {
+			return workspaceSymbolDebounceMsg{generation: m.overlay.Generation, query: query}
+		})
 	case OverlaySearch:
 		m.searchGeneration++
 		m.overlay.Generation = m.searchGeneration
@@ -2453,6 +3020,79 @@ func (m *Model) refreshFileOpenResults() {
 		m.overlay.Results[i].Review = diff.MarkersForIndex(review, loc.Path, loc.Line)
 	}
 	m.clampOverlayCursor()
+}
+
+func (m *Model) refreshNavigateResults() {
+	if m.overlay.Kind != OverlayNavigate {
+		return
+	}
+	m.overlay.Loading = m.projectFilesLoading || m.overlay.SymbolLoading || m.overlay.GrepLoading
+	if m.projectFilesErr != nil {
+		m.overlay.Err = m.projectFilesErr
+	}
+
+	files := navsearch.RankFiles(
+		m.projectFiles,
+		m.overlay.Query,
+		m.reviewChangedPaths(),
+		recentPathRanks(m.recentPaths),
+		overlayResultLimit,
+	)
+	review := m.reviewIndex()
+	for i := range files {
+		loc := files[i].Location
+		files[i].Review = diff.MarkersForIndex(review, loc.Path, loc.Line)
+	}
+
+	remaining := overlayResultLimit - len(files)
+	results := append([]navsearch.Result(nil), files...)
+	if remaining > 0 && m.overlay.Query != "" {
+		symbols := navsearch.RankSymbols(dedupeNavigateSymbols(m.overlay.RawResults, m.overlay.NavigateSymbols), m.overlay.Query, remaining)
+		results = append(results, symbols...)
+		remaining -= len(symbols)
+		if remaining > 0 {
+			grep := navsearch.RankGrepResults(
+				m.overlay.NavigateGrep,
+				m.overlay.Query,
+				m.currentReviewLocation(),
+				review,
+				recentPathRanks(m.recentPaths),
+				overlayResultLimit,
+			)
+			symbolLines := make(map[string]bool, len(symbols))
+			for _, symbol := range symbols {
+				symbolLines[symbol.Location.Path+"\x00"+strconv.Itoa(symbol.Location.Line)] = true
+			}
+			for _, result := range grep {
+				if symbolLines[result.Location.Path+"\x00"+strconv.Itoa(result.Location.Line)] {
+					continue
+				}
+				results = append(results, result)
+				remaining--
+				if remaining == 0 {
+					break
+				}
+			}
+		}
+	}
+	m.overlay.Results = results
+	m.clampOverlayCursor()
+}
+
+func dedupeNavigateSymbols(primary, fallback []navsearch.Result) []navsearch.Result {
+	results := make([]navsearch.Result, 0, len(primary)+len(fallback))
+	seen := make(map[string]bool, len(primary)+len(fallback))
+	for _, group := range [][]navsearch.Result{primary, fallback} {
+		for _, result := range group {
+			key := result.SearchText + "\x00" + result.Location.Path + "\x00" + strconv.Itoa(result.Location.Line)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			results = append(results, result)
+		}
+	}
+	return results
 }
 
 func (m *Model) refreshCommandPaletteResults() {
@@ -3024,6 +3664,11 @@ func (m Model) overlayView() ui.Overlay {
 		overlay.Title = "Workspace symbols"
 		overlay.Prompt = "gS"
 		overlay.Empty = "No symbols"
+	case OverlayNavigate:
+		overlay.Title = "Search everywhere · files, symbols, then grep"
+		overlay.Prompt = "⇧⇧"
+		overlay.Empty = "No matching files, symbols, or text"
+		overlay.FullHeight = true
 	case OverlayCommandPalette:
 		overlay.Title = "Commands · tab/shift+tab or left/right changes category · enter runs"
 		overlay.Prompt = "?"
@@ -3044,14 +3689,42 @@ func (m Model) overlayView() ui.Overlay {
 		overlay.Error = m.overlay.Err.Error()
 	}
 	for _, result := range m.overlay.Results {
+		displayResult := result
+		labelWidth := 0
+		if m.overlay.Kind == OverlayNavigate && result.Group != navsearch.ResultGroupNone {
+			displayResult.Label = navigateResultLabel(result)
+			labelWidth = max(18, min(42, m.width*2/5))
+		}
 		overlay.Results = append(overlay.Results, ui.OverlayResult{
-			Label:       m.overlayResultLabel(result),
+			Label:       m.overlayResultLabel(displayResult),
 			Preview:     result.Preview,
+			LabelWidth:  labelWidth,
 			Tone:        m.resultTone(result.Kind, result.Location, result.Side, result.Review),
-			ChangeField: m.overlay.Kind == OverlayWorkspaceSymbol,
+			ChangeField: m.overlay.Kind == OverlayWorkspaceSymbol || (m.overlay.Kind == OverlayNavigate && result.Kind == navsearch.ResultText),
 		})
 	}
 	return overlay
+}
+
+func navigateResultLabel(result navsearch.Result) string {
+	path := shortNavigatePath(result.Location.Path)
+	location := path + ":" + strconv.Itoa(max(1, result.Location.Line))
+	if result.Group == navsearch.ResultGroupGrep {
+		return "[grep] " + location
+	}
+	prefix := "[symbol]"
+	if end := strings.IndexByte(result.Label, ']'); end >= 0 {
+		prefix = result.Label[:end+1]
+	}
+	return prefix + " " + result.SearchText + " · " + location
+}
+
+func shortNavigatePath(path string) string {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) <= 2 {
+		return strings.Join(parts, "/")
+	}
+	return "…/" + strings.Join(parts[len(parts)-2:], "/")
 }
 
 func (m Model) bottomPanelView() *ui.BottomPanel {
@@ -3310,7 +3983,8 @@ func (m Model) diagnosticLabel(diagnostic lsp.Diagnostic) string {
 func (m Model) overlayResultLabel(result navsearch.Result) string {
 	label := result.Label
 	reviewMarkers := m.reviewMarkersForResultSide(result.Location, result.Side, result.Review)
-	markers := m.reviewMarkerLabelsWithChangeText(result.Location, reviewMarkers, m.overlay.Kind != OverlayWorkspaceSymbol)
+	showChangeText := m.overlay.Kind != OverlayWorkspaceSymbol && !(m.overlay.Kind == OverlayNavigate && result.Kind == navsearch.ResultText)
+	markers := m.reviewMarkerLabelsWithChangeText(result.Location, reviewMarkers, showChangeText)
 	if len(markers) > 0 {
 		label = "[" + strings.Join(markers, ",") + "] " + label
 	}
@@ -3495,16 +4169,37 @@ func (m Model) workspaceSymbolOverlayRawResults(results []lsp.WorkspaceSymbol) [
 	out := make([]navsearch.Result, 0, len(results))
 	for _, symbol := range results {
 		review := m.reviewWithOutlineChange(symbol.Location, symbol.Name, symbol.Kind, symbol.Review)
+		preview := symbol.Preview
+		if preview == "" {
+			preview = symbol.ContainerName
+		}
 		out = append(out, navsearch.Result{
-			Kind:     navsearch.ResultText,
-			Location: symbol.Location,
-			Label:    lsp.WorkspaceSymbolLabel(symbol),
-			Preview:  symbol.ContainerName,
-			Score:    symbol.Score,
-			Review:   review,
+			Kind:           navsearch.ResultText,
+			Group:          navsearch.ResultGroupSymbol,
+			Location:       symbol.Location,
+			Label:          lsp.WorkspaceSymbolLabel(symbol),
+			SearchText:     symbol.Name,
+			Preview:        preview,
+			Score:          symbol.Score,
+			Review:         review,
+			SymbolCategory: workspaceSymbolCategory(symbol.Kind),
+			Reference:      navsearch.ReferenceDefinition,
 		})
 	}
 	return out
+}
+
+func (m Model) workspaceSymbolUsageRawResults(results []navsearch.Result) []navsearch.Result {
+	review := m.reviewIndex()
+	for i := range results {
+		markers := diff.MarkersForIndex(review, results[i].Location.Path, results[i].Location.Line)
+		markers.ContainsAddition = markers.ContainsAddition || results[i].Review.ContainsAddition
+		markers.ContainsDeletion = markers.ContainsDeletion || results[i].Review.ContainsDeletion
+		markers.EntireAddition = markers.EntireAddition || results[i].Review.EntireAddition
+		markers.EntireDeletion = markers.EntireDeletion || results[i].Review.EntireDeletion
+		results[i].Review = markers
+	}
+	return results
 }
 
 func (m Model) reviewWithOutlineChange(loc source.Location, name string, kind lsp.SymbolKind, review diff.ReviewMarkers) diff.ReviewMarkers {

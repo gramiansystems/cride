@@ -284,6 +284,7 @@ type WorkspaceSymbol struct {
 	Kind          SymbolKind
 	Location      source.Location
 	ContainerName string
+	Preview       string
 	Score         int
 	Review        diff.ReviewMarkers
 }

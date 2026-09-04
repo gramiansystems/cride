@@ -19,6 +19,7 @@ import (
 	"cride/internal/diffsource/worktree"
 	"cride/internal/highlight"
 	"cride/internal/lsp"
+	crideterminal "cride/internal/terminal"
 	"cride/internal/ui"
 )
 
@@ -106,18 +107,25 @@ files:
 		TrueColor: terminalSupportsTrueColor(),
 		Disabled:  os.Getenv("NO_COLOR") != "",
 	})
+	keyboardInput, restoreKeyboard := crideterminal.EnableKeyboardEnhancements(os.Stdin, os.Stdout)
+	defer restoreKeyboard()
 
-	p := tea.NewProgram(
-		app.NewWithOptions(src, app.Options{
-			LSP:          lsp.NewProcessClient(src.Root(), lsp.DefaultConfig()),
-			Highlighter:  hl,
-			FreshSession: *fresh,
-		}),
+	programOptions := []tea.ProgramOption{
 		tea.WithAltScreen(),
 		tea.WithMouseCellMotion(),
-	)
-	if _, err := p.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "cride: %v\n", err)
+	}
+	if keyboardInput != nil {
+		programOptions = append(programOptions, tea.WithInput(keyboardInput))
+	}
+	p := tea.NewProgram(app.NewWithOptions(src, app.Options{
+		LSP:          lsp.NewProcessClient(src.Root(), lsp.DefaultConfig()),
+		Highlighter:  hl,
+		FreshSession: *fresh,
+	}), programOptions...)
+	_, runErr := p.Run()
+	restoreKeyboard()
+	if runErr != nil {
+		fmt.Fprintf(os.Stderr, "cride: %v\n", runErr)
 		os.Exit(1)
 	}
 }

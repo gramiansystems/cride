@@ -29,6 +29,7 @@ type Overlay struct {
 type OverlayResult struct {
 	Label       string
 	Preview     string
+	LabelWidth  int
 	Tone        ResultTone
 	ChangeField bool
 }
@@ -87,7 +88,11 @@ func overlayLines(overlay Overlay, width, height int) []string {
 	available := max(0, height-len(lines))
 	start := min(max(overlay.Top, 0), max(0, len(overlay.Results)-available))
 	for i := start; i < len(overlay.Results) && i < start+available; i++ {
-		line := overlayResultLineWithLabelWidthAndMatch(overlay.Results[i], width, overlay.LabelWidth, overlay.Match, overlay.MatchFold)
+		labelWidth := overlay.LabelWidth
+		if overlay.Results[i].LabelWidth > 0 {
+			labelWidth = overlay.Results[i].LabelWidth
+		}
+		line := overlayResultLineWithLabelWidthAndMatch(overlay.Results[i], width, labelWidth, overlay.Match, overlay.MatchFold)
 		line = renderResultRow(line, width, i == overlay.Cursor, overlay.Results[i].Tone)
 		lines = append(lines, line)
 	}
