@@ -68,9 +68,8 @@ var Groups = []Group{
 		{"ZZ / ZQ", "Save to the working tree / discard, back to review"},
 	}},
 	{"Comments & review file", []Binding{
-		{"c/C", "Comment on the current line / general comment"},
+		{"c/C", "Comment on the current line (or edit selected comment) / general comment"},
 		{"]a/[a", "Next/previous comment"},
-		{"x", "Toggle a comment resolved"},
 		{"ctrl+s / e", "Save review.md without leaving cride"},
 	}},
 	{"Search & open", []Binding{
@@ -97,6 +96,7 @@ var Groups = []Group{
 		{"drag panel border", "Resize the change list or active result panel"},
 		{"click file list", "Select a changed file"},
 		{"click code row", "Move the cursor to that row"},
+		{"click comment [ ] / [edit]", "Mark a comment done/reopen it, or edit it"},
 	}},
 	{"App", []Binding{
 		{"?, f1, g?", "Open the categorized command palette"},

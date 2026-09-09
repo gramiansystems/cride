@@ -74,6 +74,44 @@ func TestRenderBrowsingShape(t *testing.T) {
 	}
 }
 
+func TestCommentHeaderControlsMatchRenderedColumns(t *testing.T) {
+	t.Parallel()
+
+	row := Row{
+		Kind:          RowComment,
+		Text:          CommentHeaderText("must-fix", false, false, false),
+		CommentHeader: true,
+	}
+	if got, want := row.Text, "[must-fix]  [edit]  Mark as Done: [ ]"; got != want {
+		t.Fatalf("comment header = %q, want %q", got, want)
+	}
+	if strings.Contains(row.Text, "Marked As Done") {
+		t.Fatalf("app header uses review.md wording: %q", row.Text)
+	}
+	rendered := stripANSI(renderRow(nil, row, nil, 0, 0))
+	checkboxByte := strings.Index(rendered, "[ ]")
+	editByte := strings.Index(rendered, "[edit]")
+	if checkboxByte < 0 || editByte < 0 {
+		t.Fatalf("comment controls missing from %q", rendered)
+	}
+	checkbox := lipgloss.Width(rendered[:checkboxByte])
+	edit := lipgloss.Width(rendered[:editByte])
+	if got := CommentControlAt(row, checkbox, 0, 100); got != CommentControlMarkedAsDone {
+		t.Fatalf("checkbox control = %v", got)
+	}
+	if got := CommentControlAt(row, edit, 0, 100); got != CommentControlEdit {
+		t.Fatalf("edit control = %v", got)
+	}
+	if got := CommentControlAt(row, edit%20, edit/20, 20); got != CommentControlEdit {
+		t.Fatalf("wrapped edit control = %v", got)
+	}
+	done := row
+	done.Text = CommentHeaderText("must-fix", true, false, false)
+	if !strings.HasSuffix(done.Text, "Mark as Done: [x]") {
+		t.Fatalf("checked comment header = %q", done.Text)
+	}
+}
+
 func TestFooterStatsIgnoreUnchangedNavigationFiles(t *testing.T) {
 	t.Parallel()
 

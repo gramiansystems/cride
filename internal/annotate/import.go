@@ -17,6 +17,7 @@ import (
 var (
 	markdownAnchorHeading  = regexp.MustCompile(`^### L([1-9][0-9]*)(?:-L([1-9][0-9]*))? \[([^]]+)\](?: (\(baseline\)))?(?: (✓ resolved|\(detached\)))?$`)
 	markdownGeneralHeading = regexp.MustCompile(`^- \*\*\[([^]]+)\]\*\*(?: (✓ resolved|\(detached\)))?$`)
+	markdownMarkedAsDone   = regexp.MustCompile(`^\*\*Marked As Done:\*\*\s*(true|false)$`)
 )
 
 // LoadMarkdown reads and parses an editable review.md export.
@@ -84,6 +85,16 @@ func ParseMarkdown(data []byte, existing Review) (Review, error) {
 				return Review{}, fmt.Errorf("review.md line %d: %w", i+1, err)
 			}
 			i++
+			if i < len(lines) {
+				found, done, err := parseMarkedAsDone(lines[i])
+				if err != nil {
+					return Review{}, fmt.Errorf("review.md line %d: %w", i+1, err)
+				}
+				if found {
+					applyMarkedAsDone(&comment, done)
+					i++
+				}
+			}
 			var snippet []string
 			for i < len(lines) && strings.HasPrefix(lines[i], ">") {
 				quoted := strings.TrimPrefix(lines[i], ">")
@@ -106,6 +117,16 @@ func ParseMarkdown(data []byte, existing Review) (Review, error) {
 				return Review{}, fmt.Errorf("review.md line %d: %w", i+1, err)
 			}
 			i++
+			if i < len(lines) {
+				found, done, err := parseMarkedAsDone(lines[i])
+				if err != nil {
+					return Review{}, fmt.Errorf("review.md line %d: %w", i+1, err)
+				}
+				if found {
+					applyMarkedAsDone(&comment, done)
+					i++
+				}
+			}
 			bodyStart := i
 			for i < len(lines) && !strings.HasPrefix(lines[i], "## ") && !strings.HasPrefix(lines[i], "- **[") {
 				i++
@@ -190,6 +211,26 @@ func parseMarkdownStatus(suffix string) Status {
 		return StatusUnresolved
 	default:
 		return StatusOpen
+	}
+}
+
+func parseMarkedAsDone(line string) (found, done bool, err error) {
+	trimmed := strings.TrimSpace(line)
+	match := markdownMarkedAsDone.FindStringSubmatch(trimmed)
+	if match != nil {
+		return true, match[1] == "true", nil
+	}
+	if strings.HasPrefix(trimmed, "**Marked As Done:**") {
+		return false, false, fmt.Errorf("Marked As Done must be true or false")
+	}
+	return false, false, nil
+}
+
+func applyMarkedAsDone(comment *Comment, done bool) {
+	if done {
+		comment.Status = StatusResolved
+	} else if comment.Status != StatusUnresolved {
+		comment.Status = StatusOpen
 	}
 }
 

@@ -2178,7 +2178,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		"A":         commandMarkAllRead,
 		"c":         commandCommentCurrent,
 		"C":         commandCommentGeneral,
-		"x":         commandToggleCommentResolved,
 		"e":         commandExportReview,
 		"}":         commandNextFile,
 		"J":         commandNextFile,
@@ -2386,7 +2385,18 @@ func (m Model) handleMouseClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		if screenIdx < 0 || screenIdx >= l.TotalLines() {
 			return m, nil
 		}
-		m.cursor = l.LineAt(screenIdx).RowIdx
+		screenLine := l.LineAt(screenIdx)
+		m.cursor = screenLine.RowIdx
+		if m.cursor >= 0 && m.cursor < len(rows) && rows[m.cursor].Kind == ui.RowComment {
+			switch ui.CommentControlAt(rows[m.cursor], msg.X-layout.DiffContentX, screenLine.WrapIdx, layout.DiffContentWidth) {
+			case ui.CommentControlMarkedAsDone:
+				m.clampScroll()
+				return m, m.toggleCommentMarkedAsDone()
+			case ui.CommentControlEdit:
+				m.clampScroll()
+				return m, m.openCommentEditor()
+			}
+		}
 		if m.cursor >= 0 && m.cursor < len(rows) && rows[m.cursor].Kind == ui.RowPair {
 			if left, ok := splitSideForClick(msg.X-layout.DiffContentX, layout.DiffContentWidth); ok {
 				m.setSplitActiveSide(left)

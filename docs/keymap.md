@@ -67,9 +67,8 @@ Press `?` (or `F1`, `g?`) inside cride for the categorized, executable command p
 
 | Keys | Action |
 | --- | --- |
-| `c/C` | Comment on the current line / general comment |
+| `c/C` | Comment on the current line (or edit selected comment) / general comment |
 | `]a/[a` | Next/previous comment |
-| `x` | Toggle a comment resolved |
 | `ctrl+s / e` | Save review.md without leaving cride |
 
 ## Search & open
@@ -105,6 +104,7 @@ Press `?` (or `F1`, `g?`) inside cride for the categorized, executable command p
 | `drag panel border` | Resize the change list or active result panel |
 | `click file list` | Select a changed file |
 | `click code row` | Move the cursor to that row |
+| `click comment [ ] / [edit]` | Mark a comment done/reopen it, or edit it |
 
 ## App
 

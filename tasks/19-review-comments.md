@@ -1,17 +1,19 @@
 # Review comment anchoring and threads
 
-> Status: comment creation, severity, persistence, drift detection, resolution,
+> Status: comment creation and editing, severity, persistence, drift detection, completion,
 > navigation, and Markdown export are implemented. This task tracks stronger
 > re-anchoring and richer thread metadata.
 
 ## Current behavior
 
-- `c` creates a line-anchored comment and `C` creates a general comment.
+- `c` creates a line-anchored comment, or edits the selected comment; `C`
+  creates a general comment. The inline `[edit]` control also opens the editor.
 - Comments carry `nit`, `question`, or `must-fix` severity.
 - Changes write through atomically to the canonical, editable `review.md`.
 - `ctrl+s`/`e` saves immediately; `ctrl+r` imports Markdown edits and reloads
   the diff without restarting cride.
-- `]a`/`[a` navigate comments and `x` toggles resolution.
+- `]a`/`[a` navigate comments. A mouse checkbox marks a comment done or
+  reopens it without adding a review-mode hotkey.
 - Anchors store side and line ranges plus the original snippet.
 - When anchored code drifts, the comment becomes unresolved and is never
   silently discarded.

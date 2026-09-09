@@ -56,9 +56,10 @@ roadmap item.
 Startup and explicit reloads parse Markdown edits; matching anchors preserve
 in-memory comment identity and timestamps, while new Markdown comments receive
 new metadata. A comment can be general or anchored to a baseline/current line
-range. The current implementation stores a code snippet with line coordinates,
-detects anchor drift, and marks detached comments unresolved rather than
-discarding them.
+range, can be edited in the inline composer, and has a mouse-controlled
+completion checkbox persisted as `Marked As Done`. The current implementation
+stores a code snippet with line coordinates, detects anchor drift, and marks
+detached comments unresolved rather than discarding them.
 
 Content-fingerprint re-anchoring and replies remain roadmap work. Markdown
 syntax changes should remain backward-compatible with existing review files.

@@ -154,7 +154,6 @@ const (
 	commandSearchCurrentFile     = "search.current-file"
 	commandTillBackward          = "cursor.till-backward"
 	commandTillForward           = "cursor.till-forward"
-	commandToggleCommentResolved = "comments.toggle-resolved"
 	commandToggleFileListOrder   = "files.toggle-order"
 	commandToggleFullFile        = "view.toggle-full-file"
 	commandToggleOutlineScope    = "symbols.toggle-outline-scope"
@@ -223,7 +222,7 @@ var commandCatalog = []Command{
 	command(commandCollapseDirectory, "Collapse directory", "h / left", "Collapse the selected change-list directory.", reviewOnly(func(c CommandContext) tea.Cmd {
 		return c.Model.collapseSelectedDirectory()
 	})),
-	command(commandCommentCurrent, "Comment on current line", "c", "Compose a review comment anchored to the current line.", reviewOnly(func(c CommandContext) tea.Cmd {
+	command(commandCommentCurrent, "Comment on current line or edit comment", "c", "Compose a review comment on a source row, or edit the selected comment.", reviewOnly(func(c CommandContext) tea.Cmd {
 		return c.Model.openComposer(false)
 	})),
 	command(commandCommentGeneral, "Comment: add general", "C", "Compose a review-wide comment.", reviewOnly(func(c CommandContext) tea.Cmd {
@@ -536,9 +535,6 @@ var commandCatalog = []Command{
 		c.Model.pendingFind = 't'
 		return nil
 	}),
-	command(commandToggleCommentResolved, "Toggle comment resolved", "x", "Resolve or reopen the comment under the cursor.", reviewOnly(func(c CommandContext) tea.Cmd {
-		return c.Model.toggleCommentResolved()
-	})),
 	command(commandToggleFileListOrder, "Toggle file-list order", "o", "Toggle between path and most-recently-changed order.", reviewOnly(func(c CommandContext) tea.Cmd {
 		return c.Model.toggleChangeListOrder()
 	})),
@@ -606,8 +602,7 @@ func commandPaletteCategory(id string) CommandCategory {
 		commandNextAnnotation,
 		commandNextHunk,
 		commandPreviousAnnotation,
-		commandPreviousHunk,
-		commandToggleCommentResolved:
+		commandPreviousHunk:
 		return CommandCategoryReview
 
 	case commandCollapseDirectory,

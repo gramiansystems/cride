@@ -50,10 +50,12 @@ Baseline: abc123
 ## a.go
 
 ### L10 [nit] (baseline) (detached)
+**Marked As Done:** false
 > func OldName() {
 old name was clearer
 
 ### L42 [must-fix]
+**Marked As Done:** false
 > x := y.Value()
 this can nil-panic
 see the constructor
@@ -61,12 +63,14 @@ see the constructor
 ## b.go
 
 ### L7 [nit]
+**Marked As Done:** false
 > for i := range xs {
 prefer a map here
 
 ## General Comments
 
-- **[question]** ✓ resolved
+- **[question]**
+  **Marked As Done:** true
   overall direction looks right
 `
 	if got != want {
@@ -170,5 +174,42 @@ func TestParseMarkdownRejectsMalformedCommentHeading(t *testing.T) {
 	data := []byte("# Review\n\n## a.go\n\n### near line ten [urgent]\nfix this\n")
 	if _, err := ParseMarkdown(data, Review{}); err == nil || !strings.Contains(err.Error(), "line 5") {
 		t.Fatalf("malformed heading error = %v", err)
+	}
+}
+
+func TestParseMarkdownLoadsMarkedAsDoneAndLegacyResolved(t *testing.T) {
+	t.Parallel()
+
+	data := []byte(`# Review
+
+## a.go
+
+### L2 [nit]
+**Marked As Done:** true
+new format
+
+### L3 [question] ✓ resolved
+legacy format
+`)
+	parsed, err := ParseMarkdown(data, Review{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(parsed.Comments) != 2 {
+		t.Fatalf("comments = %d, want 2", len(parsed.Comments))
+	}
+	for _, comment := range parsed.Comments {
+		if !comment.Resolved() {
+			t.Fatalf("comment was not loaded as done: %+v", comment)
+		}
+	}
+}
+
+func TestParseMarkdownRejectsInvalidMarkedAsDoneValue(t *testing.T) {
+	t.Parallel()
+
+	data := []byte("# Review\n\n## a.go\n\n### L2 [nit]\n**Marked As Done:** maybe\ntext\n")
+	if _, err := ParseMarkdown(data, Review{}); err == nil || !strings.Contains(err.Error(), "must be true or false") {
+		t.Fatalf("Marked As Done error = %v", err)
 	}
 }

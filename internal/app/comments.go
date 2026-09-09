@@ -25,11 +25,12 @@ import (
 var nowFunc = time.Now
 
 type composerState struct {
-	open     bool
-	input    textarea.Model
-	severity annotate.Severity
-	anchor   *annotate.Anchor // nil for general comments
-	snippet  string
+	open      bool
+	input     textarea.Model
+	severity  annotate.Severity
+	anchor    *annotate.Anchor // nil for general comments
+	snippet   string
+	commentID string // non-empty while editing an existing comment
 }
 
 type reviewLoadedMsg struct {
@@ -109,6 +110,13 @@ func (m Model) exportReviewCmd() tea.Cmd {
 
 // openComposer starts a comment on the current row (or a general comment).
 func (m *Model) openComposer(general bool) tea.Cmd {
+	if !general {
+		rows := m.currentRows()
+		if m.cursor >= 0 && m.cursor < len(rows) && rows[m.cursor].Kind == ui.RowComment {
+			return m.openCommentEditor()
+		}
+	}
+
 	m.countBuf = ""
 	m.pendingG = false
 	m.pendingZ = false
@@ -141,6 +149,49 @@ func (m *Model) openComposer(general bool) tea.Cmd {
 		severity: annotate.SeverityNit,
 		anchor:   anchor,
 		snippet:  snippet,
+	}
+	m.clampScroll()
+	return textarea.Blink
+}
+
+// openCommentEditor reuses the composer for the comment under the cursor.
+// Identity, anchor, creation time, snippet, and completion state are retained
+// when the edited body and severity are saved.
+func (m *Model) openCommentEditor() tea.Cmd {
+	idx, ok := m.commentAtCursor()
+	if !ok {
+		return m.notify(ui.ToastWarn, "no comment under the cursor")
+	}
+	c := m.review.Comments[idx]
+
+	m.countBuf = ""
+	m.pendingG = false
+	m.pendingZ = false
+	m.referencePanel = referencePanelState{}
+	m.enrichmentPanel = enrichmentPanelState{}
+
+	input := textarea.New()
+	input.Placeholder = "comment…"
+	input.Prompt = "│ "
+	input.ShowLineNumbers = false
+	input.CharLimit = 0
+	input.SetWidth(max(20, m.width-6))
+	input.SetHeight(composerInputHeight)
+	input.SetValue(c.Body)
+	input.Focus()
+
+	var anchor *annotate.Anchor
+	if c.Anchor != nil {
+		copied := *c.Anchor
+		anchor = &copied
+	}
+	m.composer = composerState{
+		open:      true,
+		input:     input,
+		severity:  c.Severity,
+		anchor:    anchor,
+		snippet:   c.Snippet,
+		commentID: c.ID,
 	}
 	m.clampScroll()
 	return textarea.Blink
@@ -207,8 +258,26 @@ func (m Model) handleComposerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m *Model) saveComposedComment() tea.Cmd {
 	body := strings.TrimRight(m.composer.input.Value(), "\n ")
 	if strings.TrimSpace(body) == "" {
+		if m.composer.commentID != "" {
+			return m.notify(ui.ToastWarn, "comment cannot be empty")
+		}
 		m.composer = composerState{}
 		return m.notify(ui.ToastInfo, "empty comment discarded")
+	}
+	if m.composer.commentID != "" {
+		for i := range m.review.Comments {
+			if m.review.Comments[i].ID != m.composer.commentID {
+				continue
+			}
+			m.review.Comments[i].Body = body
+			m.review.Comments[i].Severity = m.composer.severity
+			m.composer = composerState{}
+			m.rowsVersion++
+			m.clampScroll()
+			return tea.Batch(m.saveReviewCmd(), m.notify(ui.ToastInfo, "comment updated"))
+		}
+		m.composer = composerState{}
+		return m.notify(ui.ToastWarn, "comment no longer exists")
 	}
 	comment := annotate.Comment{
 		ID:       annotate.NewID(),
@@ -230,7 +299,7 @@ func (m *Model) saveComposedComment() tea.Cmd {
 // pattern hunk headers use. The anchored row gets a gutter marker.
 func (m *Model) withCommentRows(rows []ui.Row) []ui.Row {
 	path := m.currentFilePath()
-	if path == "" || len(m.review.Comments) == 0 {
+	if len(m.review.Comments) == 0 {
 		return rows
 	}
 	type key struct {
@@ -238,18 +307,26 @@ func (m *Model) withCommentRows(rows []ui.Row) []ui.Row {
 		line     int
 	}
 	byLine := map[key][]annotate.Comment{}
+	var general []annotate.Comment
 	for _, c := range m.review.Comments {
-		if c.Anchor == nil || c.Anchor.Path != path {
+		if c.Anchor == nil {
+			general = append(general, c)
+			continue
+		}
+		if c.Anchor.Path != path {
 			continue
 		}
 		k := key{baseline: c.Anchor.Side == annotate.SideBaseline, line: c.Anchor.LineStart}
 		byLine[k] = append(byLine[k], c)
 	}
-	if len(byLine) == 0 {
+	if len(byLine) == 0 && len(general) == 0 {
 		return rows
 	}
 
 	out := make([]ui.Row, 0, len(rows)+4)
+	for _, c := range general {
+		out = append(out, commentRows(m.selectedFile, c)...)
+	}
 	for _, row := range rows {
 		if !row.IsLineRow() {
 			out = append(out, row)
@@ -276,19 +353,19 @@ func (m *Model) withCommentRows(rows []ui.Row) []ui.Row {
 // commentRows renders one comment as inline rows: a header line and the body.
 func commentRows(fileIdx int, c annotate.Comment) []ui.Row {
 	muted := c.Resolved()
-	header := "[" + string(c.Severity) + "]"
-	switch c.Status {
-	case annotate.StatusResolved:
-		header += " ✓ resolved"
-	case annotate.StatusUnresolved:
-		header += " (detached)"
-	}
+	header := ui.CommentHeaderText(
+		string(c.Severity),
+		c.Resolved(),
+		c.Status == annotate.StatusUnresolved,
+		c.Anchor == nil,
+	)
 	rows := []ui.Row{{
-		Kind:      ui.RowComment,
-		FileIdx:   fileIdx,
-		Text:      header,
-		CommentID: c.ID,
-		Muted:     muted,
+		Kind:          ui.RowComment,
+		FileIdx:       fileIdx,
+		Text:          header,
+		CommentID:     c.ID,
+		CommentHeader: true,
+		Muted:         muted,
 	}}
 	for _, line := range strings.Split(strings.TrimRight(c.Body, "\n"), "\n") {
 		rows = append(rows, ui.Row{
@@ -320,8 +397,8 @@ func (m *Model) commentAtCursor() (int, bool) {
 	return 0, false
 }
 
-// toggleCommentResolved flips resolved on the comment under the cursor (x).
-func (m *Model) toggleCommentResolved() tea.Cmd {
+// toggleCommentMarkedAsDone flips completion on the comment under the cursor.
+func (m *Model) toggleCommentMarkedAsDone() tea.Cmd {
 	idx, ok := m.commentAtCursor()
 	if !ok {
 		return m.notify(ui.ToastWarn, "no comment under the cursor")
@@ -477,13 +554,22 @@ func (m Model) composerView() *ui.Composer {
 		return nil
 	}
 	title := "New comment"
+	if m.composer.commentID != "" {
+		title = "Edit comment"
+	}
 	if m.composer.anchor != nil {
-		title = "Comment on " + m.composer.anchor.Path + ":" + strconv.Itoa(m.composer.anchor.LineStart)
+		prefix := "Comment on "
+		if m.composer.commentID != "" {
+			prefix = "Edit comment on "
+		}
+		title = prefix + m.composer.anchor.Path + ":" + strconv.Itoa(m.composer.anchor.LineStart)
 		if m.composer.anchor.Side == annotate.SideBaseline {
 			title += " (baseline)"
 		}
-	} else {
+	} else if m.composer.commentID == "" {
 		title = "General comment"
+	} else {
+		title = "Edit general comment"
 	}
 	title += " · [" + string(m.composer.severity) + "]"
 	return &ui.Composer{

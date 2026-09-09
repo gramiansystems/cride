@@ -30,8 +30,9 @@ but it is not trying to replace your editor or Git client.
 - **Live review queue:** changed files become unread again when they are edited.
 - **Persistent sessions:** the baseline, cursor, view state, and read state
   survive restarts.
-- **Review comments:** attach comments to either side of a diff, resolve them,
-  and export an agent-friendly Markdown review.
+- **Review comments:** attach comments to either side of a diff, edit them,
+  mark them done with a mouse checkbox, and export an agent-friendly Markdown
+  review.
 - **Review-aware navigation:** fuzzy file open, project search, definitions,
   references, changed-symbol outlines, diagnostics, hover, and call hierarchy.
 - **Graceful fallbacks:** lexical navigation continues to work when a language
@@ -75,8 +76,11 @@ The core loop is:
 2. Press `R` to mark the current file read and advance, or `A` to mark all
    files read.
 3. Press `c` for a line comment or `C` for a general comment.
-4. Press `ctrl+s` (or `e`) to save the review to `review.md`.
-5. Keep cride open while the code changes; edited files return to the unread
+4. Use the trailing `Mark as Done: [ ]` control when a comment has been
+   addressed, or `[edit]` to change its text. Pressing `c` on a selected
+   comment also edits it.
+5. Press `ctrl+s` (or `e`) to save the review to `review.md`.
+6. Keep cride open while the code changes; edited files return to the unread
    queue automatically.
 
 A useful instruction for a coding agent is:
@@ -115,7 +119,7 @@ Run `cride --help` for the complete command-line reference.
 | `]c` / `[c` | Next / previous hunk |
 | `}` / `{` | Next / previous file in the file view |
 | `ctrl+a` | Toggle all repository files / diff files only |
-| `c` / `C` | Line comment / general comment |
+| `c` / `C` | Line comment (or edit selected comment) / general comment |
 | `ctrl+s` / `e` | Save `review.md` without leaving cride |
 | `ctrl+r` | Reload the diff and import edits from `review.md` |
 | `tab` | Toggle full-file context |
@@ -180,11 +184,13 @@ highlighting, and truecolor is detected through `COLORTERM`.
 | `.cride/editing.json` | Temporary advisory edit lock |
 
 Comment changes update `review.md` directly and `ctrl+s` forces an immediate
-atomic save. You can also edit comment text, headings, severity, status, or
-anchors in the file; `ctrl+r` reloads it, so cride does not need to be restarted
-between review passes. Matching anchors retain their in-memory IDs and
-timestamps. A missing file means an empty review. Malformed comment headings
-are rejected without replacing the review currently in memory.
+atomic save. Each comment includes a structured `Marked As Done` field; the
+app writes and reloads this state, and still accepts the former `✓ resolved`
+syntax. You can also edit comment text, headings, severity, completion state,
+or anchors in the file; `ctrl+r` reloads it, so cride does not need to be
+restarted between review passes. Matching anchors retain their in-memory IDs
+and timestamps. A missing file means an empty review. Malformed comment
+headings are rejected without replacing the review currently in memory.
 
 ## Project documentation
 

@@ -69,6 +69,7 @@ func ExportMarkdown(review Review) []byte {
 		}
 		b.WriteString("\n")
 		b.WriteString(anchoredHeading(c))
+		writeMarkedAsDone(&b, c, "")
 		if c.Snippet != "" {
 			for _, line := range strings.Split(c.Snippet, "\n") {
 				fmt.Fprintf(&b, "> %s\n", line)
@@ -81,7 +82,8 @@ func ExportMarkdown(review Review) []byte {
 		b.WriteString("\n## General Comments\n")
 		for _, c := range general {
 			b.WriteString("\n")
-			fmt.Fprintf(&b, "- **[%s]**%s\n", c.Severity, resolvedSuffix(c))
+			fmt.Fprintf(&b, "- **[%s]**%s\n", c.Severity, statusSuffix(c))
+			writeMarkedAsDone(&b, c, "  ")
 			writeBody(&b, indentBody(c.Body))
 		}
 	}
@@ -97,18 +99,23 @@ func anchoredHeading(c Comment) string {
 	if c.Anchor.Side == SideBaseline {
 		side = " (baseline)"
 	}
-	return fmt.Sprintf("### %s [%s]%s%s\n", lines, c.Severity, side, resolvedSuffix(c))
+	return fmt.Sprintf("### %s [%s]%s%s\n", lines, c.Severity, side, statusSuffix(c))
 }
 
-func resolvedSuffix(c Comment) string {
+// statusSuffix retains detached-anchor state in the heading. Completion is a
+// separate, explicit field so review.md readers and editors do not have to
+// infer it from decoration in a heading.
+func statusSuffix(c Comment) string {
 	switch c.Status {
-	case StatusResolved:
-		return " ✓ resolved"
 	case StatusUnresolved:
 		return " (detached)"
 	default:
 		return ""
 	}
+}
+
+func writeMarkedAsDone(b *strings.Builder, c Comment, indent string) {
+	fmt.Fprintf(b, "%s**Marked As Done:** %t\n", indent, c.Resolved())
 }
 
 func writeBody(b *strings.Builder, body string) {

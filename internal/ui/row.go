@@ -30,7 +30,10 @@ type Row struct {
 	Right *diff.Line
 	// CommentID ties RowComment rows (and anchored markers) to their comment.
 	CommentID string
-	// Muted dims the row (e.g. resolved comments).
+	// CommentHeader identifies the row that owns the clickable completion and
+	// edit controls for a comment.
+	CommentHeader bool
+	// Muted dims the row (e.g. comments marked done).
 	Muted bool
 }
 

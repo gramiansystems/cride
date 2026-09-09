@@ -148,6 +148,66 @@ type Composer struct {
 	Hints string
 }
 
+// CommentControl identifies an interactive control in a comment header.
+type CommentControl int
+
+const (
+	CommentControlNone CommentControl = iota
+	CommentControlMarkedAsDone
+	CommentControlEdit
+)
+
+const (
+	commentTextColumn  = diffRowPrefixWidth - 2
+	commentDoneOpen    = "[ ]"
+	commentDoneChecked = "[x]"
+	commentDoneLabel   = "Mark as Done: "
+	commentEditLabel   = "[edit]"
+)
+
+// CommentHeaderText renders the stable, mouse-addressable controls shown on
+// the first row of an inline comment.
+func CommentHeaderText(severity string, done, detached, general bool) string {
+	checkbox := commentDoneOpen
+	if done {
+		checkbox = commentDoneChecked
+	}
+	text := "[" + severity + "]"
+	if general {
+		text += " (general)"
+	}
+	if detached {
+		text += " (detached)"
+	}
+	return text + "  " + commentEditLabel + "  " + commentDoneLabel + checkbox
+}
+
+// CommentControlAt maps a click in a possibly wrapped comment header to the
+// control rendered at that position.
+func CommentControlAt(row Row, column, wrapIndex, width int) CommentControl {
+	if row.Kind != RowComment || !row.CommentHeader || column < 0 || wrapIndex < 0 || width <= 0 {
+		return CommentControlNone
+	}
+	absoluteColumn := wrapIndex*width + column
+	checkbox := commentDoneOpen
+	if strings.Contains(row.Text, commentDoneChecked) {
+		checkbox = commentDoneChecked
+	}
+	if checkboxOffset := strings.LastIndex(row.Text, checkbox); checkboxOffset >= 0 {
+		checkboxStart := commentTextColumn + checkboxOffset
+		if absoluteColumn >= checkboxStart && absoluteColumn < checkboxStart+len(commentDoneOpen) {
+			return CommentControlMarkedAsDone
+		}
+	}
+	if editOffset := strings.Index(row.Text, commentEditLabel); editOffset >= 0 {
+		editStart := commentTextColumn + editOffset
+		if absoluteColumn >= editStart && absoluteColumn < editStart+len(commentEditLabel) {
+			return CommentControlEdit
+		}
+	}
+	return CommentControlNone
+}
+
 func composerLines(c Composer, width, height int) []string {
 	lines := []string{fileHeaderStyle.Render(truncate.String(c.Title, uint(max(1, width))))}
 	for _, line := range strings.Split(strings.TrimRight(c.Body, "\n"), "\n") {
@@ -811,7 +871,13 @@ func renderRow(files []diff.FileDiff, r Row, hl *highlight.Highlighter, rowIdx, 
 		if r.Muted {
 			style = dimStyle
 		}
-		return strings.Repeat(" ", diffRowPrefixWidth-4) + style.Render("┃ "+r.Text)
+		prefix := strings.Repeat(" ", diffRowPrefixWidth-4)
+		if r.CommentHeader && !r.Muted {
+			if controls := strings.Index(r.Text, "  "+commentEditLabel); controls >= 0 {
+				return prefix + style.Render("┃ "+r.Text[:controls]) + dimStyle.Render(r.Text[controls:])
+			}
+		}
+		return prefix + style.Render("┃ "+r.Text)
 	default:
 		f := files[r.FileIdx]
 		ln := r.Line

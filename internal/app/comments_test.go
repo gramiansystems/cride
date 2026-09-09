@@ -244,6 +244,7 @@ func TestCtrlRImportsEditedReviewMarkdown(t *testing.T) {
 		Status:   annotate.StatusOpen,
 	}}}
 	markdown := strings.Replace(string(annotate.ExportMarkdown(existing)), "original wording", "edited wording", 1)
+	markdown = strings.Replace(markdown, "**Marked As Done:** false", "**Marked As Done:** true", 1)
 	if err := os.WriteFile(filepath.Join(root, annotate.ExportName), []byte(markdown), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -267,6 +268,9 @@ func TestCtrlRImportsEditedReviewMarkdown(t *testing.T) {
 	}
 	if m.review.Comments[0].ID != "keep-me" || !m.review.Comments[0].Created.Equal(created) {
 		t.Fatalf("import lost comment identity: %+v", m.review.Comments[0])
+	}
+	if !m.review.Comments[0].Resolved() {
+		t.Fatalf("import did not load Marked As Done: %+v", m.review.Comments[0])
 	}
 }
 
@@ -309,7 +313,7 @@ func TestMalformedReviewMarkdownDoesNotReplaceCurrentReview(t *testing.T) {
 	}
 }
 
-func TestResolveToggleAndAnnotationNavigation(t *testing.T) {
+func TestMarkedAsDoneCheckboxAndAnnotationNavigation(t *testing.T) {
 	t.Parallel()
 
 	m := commentTestModel()
@@ -337,15 +341,156 @@ func TestResolveToggleAndAnnotationNavigation(t *testing.T) {
 		t.Fatalf("[a landed in %s, want a.go", m.currentFilePath())
 	}
 
-	// x on the anchored row toggles resolution.
-	m = press(m, "x")
-	if m.review.Comments[0].Status != annotate.StatusResolved {
-		t.Fatalf("x did not resolve: %+v", m.review.Comments[0])
-	}
+	// There is deliberately no review-mode hotkey for completion.
 	m = press(m, "x")
 	if m.review.Comments[0].Status != annotate.StatusOpen {
-		t.Fatalf("second x did not reopen: %+v", m.review.Comments[0])
+		t.Fatalf("x changed completion state: %+v", m.review.Comments[0])
 	}
+
+	// Clicking the checkbox marks the comment done; clicking it again reopens.
+	rows := m.currentRows()
+	headerRow := -1
+	for i, row := range rows {
+		if row.CommentID == "c1" && row.CommentHeader {
+			headerRow = i
+			break
+		}
+	}
+	if headerRow < 0 {
+		t.Fatal("comment header row not rendered")
+	}
+	layout := m.mainLayout()
+	wrap := m.layoutFor(rows)
+	checkboxColumn := commentControlColumn(t, rows[headerRow], ui.CommentControlMarkedAsDone)
+	click := tea.MouseMsg{
+		X:      layout.DiffContentX + checkboxColumn,
+		Y:      layout.DiffRowsY + wrap.RowStart(headerRow) - m.topScreenLine(wrap),
+		Button: tea.MouseButtonLeft,
+		Action: tea.MouseActionPress,
+		Type:   tea.MouseLeft,
+	}
+	next, _ := m.handleMouse(click)
+	m = next.(Model)
+	if m.review.Comments[0].Status != annotate.StatusResolved {
+		t.Fatalf("checkbox did not mark comment done: %+v", m.review.Comments[0])
+	}
+	next, _ = m.handleMouse(click)
+	m = next.(Model)
+	if m.review.Comments[0].Status != annotate.StatusOpen {
+		t.Fatalf("second checkbox click did not reopen: %+v", m.review.Comments[0])
+	}
+}
+
+func TestEditExistingCommentPreservesMetadataAndPersists(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	created := time.Date(2026, 9, 9, 12, 0, 0, 0, time.UTC)
+	anchor := &annotate.Anchor{Path: "a.go", Side: annotate.SideCurrent, LineStart: 2, LineEnd: 2}
+	m := commentTestModel()
+	m.source = fakeSource{root: root}
+	m.review.Comments = []annotate.Comment{{
+		ID: "edit-me", Body: "old wording", Severity: annotate.SeverityNit,
+		Created: created, Anchor: anchor, Status: annotate.StatusResolved, Snippet: "beta two",
+	}}
+	for i, row := range m.currentRows() {
+		if row.CommentID == "edit-me" && row.CommentHeader {
+			m.cursor = i
+			break
+		}
+	}
+
+	// c is context-sensitive on a comment row and opens the existing comment.
+	next, _ := m.handleKey(key("c"))
+	m = next.(Model)
+	if !m.composer.open || m.composer.commentID != "edit-me" || m.composer.input.Value() != "old wording" {
+		t.Fatalf("editor state = %+v, body %q", m.composer, m.composer.input.Value())
+	}
+	m.composer.input.SetValue("clearer wording")
+	next, _ = m.handleComposerKey(tea.KeyMsg{Type: tea.KeyCtrlT})
+	m = next.(Model)
+	next, cmd := m.handleComposerKey(tea.KeyMsg{Type: tea.KeyCtrlS})
+	m = next.(Model)
+	if cmd == nil || m.composer.open {
+		t.Fatal("saving edit did not close and persist the composer")
+	}
+	c := m.review.Comments[0]
+	if c.Body != "clearer wording" || c.Severity != annotate.SeverityQuestion {
+		t.Fatalf("edited comment = %+v", c)
+	}
+	if c.ID != "edit-me" || !c.Created.Equal(created) || c.Anchor != anchor || c.Snippet != "beta two" || !c.Resolved() {
+		t.Fatalf("edit lost comment metadata: %+v", c)
+	}
+
+	batch, ok := cmd().(tea.BatchMsg)
+	if !ok {
+		t.Fatal("comment edit did not batch persistence")
+	}
+	for _, sub := range batch {
+		next, _ = m.Update(sub())
+		m = next.(Model)
+	}
+	markdown, err := os.ReadFile(filepath.Join(root, annotate.ExportName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(markdown), "clearer wording") || !strings.Contains(string(markdown), "**Marked As Done:** true") {
+		t.Fatalf("persisted review.md = %q", markdown)
+	}
+}
+
+func TestMouseEditControlOpensExistingGeneralComment(t *testing.T) {
+	t.Parallel()
+
+	m := commentTestModel()
+	m.review.Comments = []annotate.Comment{{
+		ID: "general", Body: "overall note", Severity: annotate.SeverityQuestion, Status: annotate.StatusOpen,
+	}}
+	rows := m.currentRows()
+	if len(rows) == 0 || !rows[0].CommentHeader || rows[0].CommentID != "general" {
+		t.Fatalf("general comment rows = %+v", rows)
+	}
+	layout := m.mainLayout()
+	editColumn := commentControlColumn(t, rows[0], ui.CommentControlEdit)
+	next, _ := m.handleMouse(tea.MouseMsg{
+		X:      layout.DiffContentX + editColumn,
+		Y:      layout.DiffRowsY,
+		Button: tea.MouseButtonLeft,
+		Action: tea.MouseActionPress,
+		Type:   tea.MouseLeft,
+	})
+	m = next.(Model)
+	if !m.composer.open || m.composer.commentID != "general" || m.composer.anchor != nil {
+		t.Fatalf("general comment editor = %+v", m.composer)
+	}
+}
+
+func TestEmptyExistingCommentEditIsNotDiscarded(t *testing.T) {
+	t.Parallel()
+
+	m := commentTestModel()
+	m.review.Comments = []annotate.Comment{{ID: "keep", Body: "keep me", Severity: annotate.SeverityNit}}
+	m.cursor = 0 // general comments render first
+	_ = m.openCommentEditor()
+	m.composer.input.SetValue("   ")
+	cmd := m.saveComposedComment()
+	if cmd == nil || !m.composer.open || m.review.Comments[0].Body != "keep me" {
+		t.Fatalf("empty edit discarded comment: open=%v comments=%+v", m.composer.open, m.review.Comments)
+	}
+	if !strings.Contains(m.status.text, "cannot be empty") {
+		t.Fatalf("empty edit status = %q", m.status.text)
+	}
+}
+
+func commentControlColumn(t *testing.T, row ui.Row, control ui.CommentControl) int {
+	t.Helper()
+	for column := 0; column < 100; column++ {
+		if ui.CommentControlAt(row, column, 0, 100) == control {
+			return column
+		}
+	}
+	t.Fatalf("control %v not found in row %+v", control, row)
+	return 0
 }
 
 func TestCommentAnchorsDetachOnDriftAndHeal(t *testing.T) {
