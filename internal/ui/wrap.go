@@ -2,6 +2,9 @@ package ui
 
 import (
 	"sort"
+	"unicode/utf8"
+
+	"github.com/mattn/go-runewidth"
 
 	"cride/internal/diff"
 )
@@ -25,8 +28,9 @@ type WrapLayout struct {
 }
 
 // BuildWrapLayout computes the wrap layout for rows rendered at width.
-// Highlighting never changes printable content, so heights are computed from
-// the unhighlighted render of each row; the styled render wraps identically.
+// Measuring raw printable widths avoids constructing and styling every
+// off-screen row. Highlighting does not change printable content, so the
+// resulting heights still match the styled render.
 func BuildWrapLayout(files []diff.FileDiff, rows []Row, width int) *WrapLayout {
 	l := &WrapLayout{
 		Width:   width,
@@ -34,7 +38,7 @@ func BuildWrapLayout(files []diff.FileDiff, rows []Row, width int) *WrapLayout {
 		starts:  make([]int, len(rows)),
 	}
 	for i, r := range rows {
-		h := len(rowScreenLines(files, r, nil, i, 0, width))
+		h := rowScreenHeight(files, r, width)
 		if h < 1 {
 			h = 1
 		}
@@ -43,6 +47,112 @@ func BuildWrapLayout(files []diff.FileDiff, rows []Row, width int) *WrapLayout {
 		l.total += h
 	}
 	return l
+}
+
+// rowScreenHeight mirrors rowScreenLines without allocating rendered text.
+// Prefix and suffix widths are fixed terminal columns; the row text itself
+// is counted rune-by-rune to preserve hard-wrap behavior around wide glyphs.
+func rowScreenHeight(files []diff.FileDiff, row Row, width int) int {
+	if row.Kind == RowPair {
+		lw, rw, ok := PairColumnWidths(width)
+		if ok {
+			left, right := 0, 0
+			if row.Left != nil {
+				left = wrappedTextHeight(row.Left.Content, lw, 0, 0)
+			}
+			if row.Right != nil {
+				right = wrappedTextHeight(row.Right.Content, rw, 0, 0)
+			}
+			return max(1, max(left, right))
+		}
+		// Narrow split views use the unified fallback renderer.
+		return wrappedTextHeight(row.Line.Content, width, unifiedRowPrefixWidth(row), 0)
+	}
+
+	switch row.Kind {
+	case RowFileHeader:
+		if row.FileIdx < 0 || row.FileIdx >= len(files) {
+			return 1
+		}
+		file := files[row.FileIdx]
+		// "    M " + path + "  +<adds> -<deletes>"
+		suffix := 5 + decimalWidth(file.Added) + decimalWidth(file.Deleted)
+		return wrappedTextHeight(file.Path(), width, 6, suffix)
+	case RowHunkHeader:
+		return wrappedTextHeight(row.Text, width, 4, 0)
+	case RowComment:
+		// Comment rows use fourteen spaces followed by "┃ ".
+		return wrappedTextHeight(row.Text, width, diffRowPrefixWidth-2, 0)
+	default:
+		return wrappedTextHeight(row.Line.Content, width, unifiedRowPrefixWidth(row), 0)
+	}
+}
+
+func unifiedRowPrefixWidth(row Row) int {
+	width := diffRowPrefixWidth
+	line := row.Line
+	if line.Kind != diff.LineAdd {
+		width += max(0, decimalWidth(line.OldLine)-4)
+	}
+	if line.Kind != diff.LineDelete {
+		width += max(0, decimalWidth(line.NewLine)-4)
+	}
+	return width
+}
+
+func decimalWidth(n int) int {
+	if n == 0 {
+		return 1
+	}
+	width := 0
+	if n < 0 {
+		width++
+		// Avoid overflowing on the minimum int. The loop below also works on
+		// negative values, so there is no need to negate it.
+	}
+	for n != 0 {
+		width++
+		n /= 10
+	}
+	return width
+}
+
+// wrappedTextHeight matches wrapLine's forceful wrapping with PreserveSpace.
+// Tabs are four spaces, and suffixWidth represents trailing ASCII columns.
+func wrappedTextHeight(text string, limit, prefixWidth, suffixWidth int) int {
+	if limit <= 0 {
+		return 1
+	}
+	lines, lineWidth := 1, 0
+	addWidth := func(width int) {
+		if lineWidth+width > limit {
+			lines++
+			lineWidth = 0
+		}
+		lineWidth += width
+	}
+	for i := 0; i < prefixWidth; i++ {
+		addWidth(1)
+	}
+	for len(text) > 0 {
+		r, size := utf8.DecodeRuneInString(text)
+		text = text[size:]
+		switch r {
+		case '\t':
+			for i := 0; i < 4; i++ {
+				addWidth(1)
+			}
+		case '\n':
+			lines++
+			lineWidth = 0
+		default:
+			addWidth(runewidth.RuneWidth(r))
+		}
+	}
+	for i := 0; i < suffixWidth; i++ {
+		addWidth(1)
+	}
+	return lines
 }
 
 // NumRows returns the number of logical rows in the layout.

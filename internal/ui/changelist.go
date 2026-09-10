@@ -149,6 +149,13 @@ func BuildChangeListView(files []diff.FileDiff, collapsed map[string]bool, unrea
 
 func BuildChangeListViewWithOptions(files []diff.FileDiff, collapsed map[string]bool, unread map[int]bool, selectedFile, cursor, top, height int, focused bool, opts ChangeListOptions) ChangeListView {
 	rows := ChangeListRowsWithOptions(files, collapsed, unread, opts)
+	return BuildChangeListViewFromRows(rows, selectedFile, cursor, top, height, focused)
+}
+
+// BuildChangeListViewFromRows applies selection, focus, and viewport state to
+// an already-built change tree. Callers that redraw frequently can cache the
+// static rows until files, collapse state, unread state, or ordering changes.
+func BuildChangeListViewFromRows(rows []ChangeListRow, selectedFile, cursor, top, height int, focused bool) ChangeListView {
 	view := ChangeListView{Rows: rows, Cursor: -1, Selected: -1, Height: max(1, height), Focused: focused}
 	for i, row := range rows {
 		if !row.IsDir && row.FileIdx == selectedFile {

@@ -164,6 +164,7 @@ func (m *Model) applySession(state session.State) bool {
 		}
 	}
 	m.rowsVersion++
+	m.invalidateChangeList()
 
 	restored := false
 	if idx := findFileIndexByPath(m.files, state.SelectedFile); idx >= 0 {

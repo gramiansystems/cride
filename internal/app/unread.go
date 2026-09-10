@@ -88,6 +88,7 @@ func (m *Model) markCurrentFileRead() tea.Cmd {
 		m.seen = make(map[string]string)
 	}
 	m.seen[f.Path()] = m.trackedFileDiffHash(f)
+	m.invalidateChangeList()
 	return m.notify(ui.ToastInfo, "marked read — "+strconv.Itoa(m.unreadCount())+" unread left")
 }
 
@@ -110,6 +111,7 @@ func (m *Model) markCurrentFileUnread() tea.Cmd {
 	}
 	if m.seen != nil {
 		delete(m.seen, m.files[m.selectedFile].Path())
+		m.invalidateChangeList()
 	}
 	return m.notify(ui.ToastInfo, "marked unread — "+strconv.Itoa(m.unreadCount())+" unread")
 }
@@ -122,6 +124,7 @@ func (m *Model) markAllRead() tea.Cmd {
 	for _, f := range m.files {
 		m.seen[f.Path()] = m.trackedFileDiffHash(f)
 	}
+	m.invalidateChangeList()
 	return m.notify(ui.ToastInfo, "all files marked read")
 }
 

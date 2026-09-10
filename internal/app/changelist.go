@@ -27,7 +27,22 @@ const (
 // motion, and click hit-testing see the same rows and scroll.
 func (m *Model) changeListView() ui.ChangeListView {
 	height := m.mainLayout().ContentHeight
-	return ui.BuildChangeListViewWithOptions(m.files, m.collapsedDirs, m.unreadFileSet(), m.selectedFile, m.listCursor, m.listTop, height, m.focus == paneList, m.changeListOptions())
+	var rows []ui.ChangeListRow
+	if m.rows != nil && m.rows.changeListValid && m.rows.changeListVersion == m.changeListVersion {
+		rows = m.rows.changeListRows
+	} else {
+		rows = ui.ChangeListRowsWithOptions(m.files, m.collapsedDirs, m.unreadFileSet(), m.changeListOptions())
+		if m.rows != nil {
+			m.rows.changeListRows = rows
+			m.rows.changeListVersion = m.changeListVersion
+			m.rows.changeListValid = true
+		}
+	}
+	return ui.BuildChangeListViewFromRows(rows, m.selectedFile, m.listCursor, m.listTop, height, m.focus == paneList)
+}
+
+func (m *Model) invalidateChangeList() {
+	m.changeListVersion++
 }
 
 func (m Model) changeListOptions() ui.ChangeListOptions {
@@ -68,6 +83,7 @@ func (m *Model) updateChangeOrder(files []diff.FileDiff) {
 		m.stampChangeOrdinals(changed)
 	}
 	m.changeHashes = nextHashes
+	m.invalidateChangeList()
 }
 
 // stampChangeOrdinals assigns fresh ordinals to a batch of changed paths,
@@ -143,6 +159,7 @@ func (m *Model) toggleChangeListOrder() tea.Cmd {
 	} else {
 		m.changeOrder = ui.ChangeListOrderChanged
 	}
+	m.invalidateChangeList()
 	if m.focus == paneList {
 		if selected := m.changeListView().Selected; selected >= 0 {
 			m.listCursor = selected
@@ -309,6 +326,7 @@ func (m *Model) toggleDirCollapsed(path string) {
 	} else {
 		m.collapsedDirs[path] = true
 	}
+	m.invalidateChangeList()
 }
 
 func (m *Model) setDirCollapsed(path string, collapsed bool) {
@@ -317,9 +335,13 @@ func (m *Model) setDirCollapsed(path string, collapsed bool) {
 			m.collapsedDirs = make(map[string]bool)
 		}
 		m.collapsedDirs[path] = true
+		m.invalidateChangeList()
 		return
 	}
-	delete(m.collapsedDirs, path)
+	if m.collapsedDirs[path] {
+		delete(m.collapsedDirs, path)
+		m.invalidateChangeList()
+	}
 }
 
 // revealSelectedFile expands any collapsed ancestor of the selected file so
@@ -333,7 +355,14 @@ func (m *Model) revealSelectedFile() {
 	if path == "" {
 		return
 	}
+	changed := false
 	for _, dir := range ui.ChangeListAncestorDirs(path) {
-		delete(m.collapsedDirs, dir)
+		if m.collapsedDirs[dir] {
+			delete(m.collapsedDirs, dir)
+			changed = true
+		}
+	}
+	if changed {
+		m.invalidateChangeList()
 	}
 }

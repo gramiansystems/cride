@@ -169,6 +169,7 @@ func TestQuestionMarkRemainsAFindTarget(t *testing.T) {
 
 	m := cursorTestModel()
 	m.files[0].Hunks[0].Lines[0].Content = "a?b"
+	m.rowsVersion++ // direct fixture mutation; runtime row changes do this too
 	m = press(m, "f")
 	m = press(m, "?")
 	if m.overlay.Kind != OverlayNone {

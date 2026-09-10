@@ -116,6 +116,7 @@ type Model struct {
 	pendingViewJump   viewJumpAnchor
 	contentGeneration int
 	rowsVersion       int
+	rows              *rowCacheState
 	wrap              *wrapCacheState
 
 	projectFiles        []string
@@ -135,6 +136,7 @@ type Model struct {
 	enrichmentPanel      enrichmentPanelState
 	enrichmentGeneration int
 	diagnostics          map[string][]lsp.Diagnostic
+	diagnosticsVersion   int
 	lspStatuses          map[string]lsp.Status
 	outlineExtractor     outline.Extractor
 	outlineChanges       []outline.SymbolChange
@@ -187,15 +189,16 @@ type Model struct {
 	searchKey    searchMatchKey
 	fileSearches map[string]searchMemo
 
-	focus           paneID
-	listCursor      int
-	listTop         int
-	changeListWidth int
-	collapsedDirs   map[string]bool
-	changeOrder     ui.ChangeListOrder
-	changeClock     int
-	changeOrdinal   map[string]int
-	changeHashes    map[string]string
+	focus             paneID
+	listCursor        int
+	listTop           int
+	changeListWidth   int
+	collapsedDirs     map[string]bool
+	changeOrder       ui.ChangeListOrder
+	changeClock       int
+	changeOrdinal     map[string]int
+	changeHashes      map[string]string
+	changeListVersion int
 
 	resultPanelPlacement ui.PanelPlacement
 	resultPanelHeight    int
@@ -665,6 +668,7 @@ func (m *Model) setProjectFilesInView(paths []string, notifyAdded bool) tea.Cmd 
 		}
 	}
 	m.files = mergeProjectFiles(reviewFiles, paths)
+	m.invalidateChangeList()
 	m.selectedFile = fileIndexByPath(m.files, previousPath)
 	if previousPath == "" && !hadFiles && len(m.files) > 0 {
 		m.viewMode = ViewFile
@@ -694,6 +698,7 @@ func (m *Model) resetToDiffFiles() tea.Cmd {
 		}
 	}
 	m.files = reviewFiles
+	m.invalidateChangeList()
 	m.includeAllFiles = false
 	m.announceAllFiles = false
 	m.viewMode = ViewDiff
@@ -3544,6 +3549,7 @@ func (m *Model) ensureFileIndex(path string) int {
 		return idx
 	}
 	m.files = append(m.files, diff.FileDiff{OldPath: path, NewPath: path, Status: diff.FileUnchanged})
+	m.invalidateChangeList()
 	return len(m.files) - 1
 }
 
@@ -3946,6 +3952,7 @@ func (m *Model) updateDiagnostics(msg enrichmentLoadedMsg) {
 	if m.diagnostics == nil {
 		m.diagnostics = make(map[string][]lsp.Diagnostic)
 	}
+	m.diagnosticsVersion++
 	switch msg.kind {
 	case enrichmentPanelDiagnosticsCurrent:
 		if msg.path != "" {
@@ -4775,11 +4782,33 @@ func hunkCoversCurrentLine(h diff.Hunk, lineNum int) bool {
 }
 
 func (m *Model) currentRows() []ui.Row {
+	key := m.currentRowCacheKey()
+	if m.rows != nil {
+		if rows, ok := m.rows.get(key); ok {
+			return rows
+		}
+	}
+
 	rows := m.currentRowsUnified()
-	if m.splitViewActive() {
+	if key.split {
 		rows = ui.PairRows(rows)
 	}
-	return m.withCommentRows(rows)
+	rows = m.withCommentRows(rows)
+	if m.rows == nil {
+		m.rows = &rowCacheState{entries: make(map[rowCacheKey][]ui.Row)}
+	}
+	m.rows.put(key, rows)
+	return rows
+}
+
+func (m *Model) currentRowCacheKey() rowCacheKey {
+	return rowCacheKey{
+		selectedFile: m.selectedFile,
+		path:         m.currentFilePath(),
+		mode:         m.viewMode,
+		split:        m.splitViewActive(),
+		rowsVersion:  m.rowsVersion,
+	}
 }
 
 func (m *Model) currentRowsUnified() []ui.Row {
@@ -5194,39 +5223,57 @@ func (m Model) changedFilePaths() []string {
 
 func (m Model) renderRows() []ui.Row {
 	rows := m.currentRows()
-	if len(rows) == 0 || len(m.diagnostics) == 0 || m.selectedFile < 0 || m.selectedFile >= len(m.files) {
+	if len(rows) == 0 || m.selectedFile < 0 || m.selectedFile >= len(m.files) {
 		return rows
 	}
-	out := make([]ui.Row, len(rows))
-	copy(out, rows)
 	file := m.files[m.selectedFile]
 	path := file.Path()
+	fileDiagnostics := m.diagnostics[path]
+	if len(fileDiagnostics) == 0 {
+		return rows
+	}
+	key := diagnosticRowCacheKey{rows: m.currentRowCacheKey(), diagnosticsVersion: m.diagnosticsVersion}
+	if m.rows != nil {
+		if decorated, ok := m.rows.getDiagnostic(key); ok {
+			return decorated
+		}
+	}
+
+	maxLine := 0
+	for _, row := range rows {
+		if loc, ok := currentLocationForRow(file, row); ok {
+			maxLine = max(maxLine, loc.Line)
+		}
+	}
+	markers := make(map[int]lsp.DiagnosticSeverity, len(fileDiagnostics))
+	for _, diagnostic := range fileDiagnostics {
+		if diagnostic.Range.Start.Path != path {
+			continue
+		}
+		start := max(1, diagnostic.Range.Start.Line)
+		end := min(max(start, diagnostic.Range.End.Line), maxLine)
+		for line := start; line <= end; line++ {
+			if severity := markers[line]; severity == 0 || diagnostic.Severity < severity {
+				markers[line] = diagnostic.Severity
+			}
+		}
+	}
+
+	out := make([]ui.Row, len(rows))
+	copy(out, rows)
 	for i, row := range out {
 		loc, ok := currentLocationForRow(file, row)
 		if !ok {
 			continue
 		}
-		if marker := m.diagnosticMarkerAt(path, loc.Line); marker != "" {
-			out[i].DiagnosticMarker = marker
+		if severity := markers[loc.Line]; severity != 0 {
+			out[i].DiagnosticMarker = severity.Marker()
 		}
+	}
+	if m.rows != nil {
+		m.rows.putDiagnostic(key, out)
 	}
 	return out
-}
-
-func (m Model) diagnosticMarkerAt(path string, line int) string {
-	var best lsp.DiagnosticSeverity
-	for _, diagnostic := range m.diagnostics[path] {
-		if !diagnostic.CoversLine(path, line) {
-			continue
-		}
-		if best == 0 || diagnostic.Severity < best {
-			best = diagnostic.Severity
-		}
-	}
-	if best == 0 {
-		return ""
-	}
-	return best.Marker()
 }
 
 func (m Model) semanticStatusLine() string {

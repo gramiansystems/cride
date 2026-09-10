@@ -125,7 +125,14 @@ func MessageRows(fileIdx int, text string) []Row {
 }
 
 func flattenFileRows(f diff.FileDiff, fileIdx int) []Row {
-	var rows []Row
+	rowCount := 1
+	if len(f.Hunks) > 0 && !f.Binary {
+		rowCount = len(f.Hunks)
+		for _, hunk := range f.Hunks {
+			rowCount += len(hunk.Lines)
+		}
+	}
+	rows := make([]Row, 0, rowCount)
 	switch {
 	case f.Binary:
 		rows = append(rows, Row{Kind: RowHunkHeader, FileIdx: fileIdx, Text: "(binary file)"})

@@ -7,6 +7,7 @@ import (
 	"unicode"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/reflow/ansi"
 	"github.com/muesli/reflow/truncate"
 	"github.com/muesli/reflow/wrap"
 
@@ -1117,6 +1118,11 @@ func numCol(n int, show bool) string {
 func wrapLine(s string, width int) []string {
 	if width <= 0 {
 		return []string{""}
+	}
+	// Most source rows fit on one screen line. Avoid copying them through a
+	// reflow buffer only to split the identical string back out again.
+	if !strings.ContainsRune(s, '\n') && ansi.PrintableRuneWidth(s) <= width {
+		return []string{s}
 	}
 	w := wrap.NewWriter(width)
 	w.PreserveSpace = true

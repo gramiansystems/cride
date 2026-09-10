@@ -93,6 +93,30 @@ func TestWrapLayoutMatchesRenderedWrapCount(t *testing.T) {
 	}
 }
 
+func TestRowScreenHeightMatchesRenderedRows(t *testing.T) {
+	t.Parallel()
+
+	files := wrappedTestFiles()
+	files[0].Added = 123
+	files[0].Deleted = 45
+	rows := append([]Row{{Kind: RowFileHeader, FileIdx: 0}}, FlattenFile(files, 0)...)
+	rows = append(rows,
+		Row{Kind: RowComment, FileIdx: 0, Text: "comment with\ta tab and 界wide text"},
+		Row{Kind: RowLine, FileIdx: 0, Line: diff.Line{Content: "combining e\u0301 and 界 glyphs"}},
+		Row{Kind: RowLine, FileIdx: 0, Line: diff.Line{Content: "wide line numbers", OldLine: 12345, NewLine: 67890}},
+	)
+	rows = append(rows, PairRows(FlattenFile(files, 0))...)
+
+	for _, width := range []int{1, 8, 17, 18, 19, 31, 48, 80} {
+		for i, row := range rows {
+			want := len(rowScreenLines(files, row, nil, i, 0, width))
+			if got := rowScreenHeight(files, row, width); got != want {
+				t.Fatalf("width %d row %d kind %d: measured %d lines, rendered %d", width, i, row.Kind, got, want)
+			}
+		}
+	}
+}
+
 func TestDiffLinesHonorTopWrap(t *testing.T) {
 	t.Parallel()
 
