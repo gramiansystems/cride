@@ -19,9 +19,10 @@ func resultPanelTestModel() Model {
 		}
 	}
 	return Model{
-		files:  testFiles(),
-		width:  160,
-		height: 40,
+		files:                testFiles(),
+		width:                160,
+		height:               40,
+		resultPanelPlacement: ui.PanelRight,
 		referencePanel: referencePanelState{
 			Open:    true,
 			Results: results,
@@ -29,31 +30,38 @@ func resultPanelTestModel() Model {
 	}
 }
 
-func TestResultPanelDockHotkeyMovesPanelRight(t *testing.T) {
+func TestResultPanelDefaultsRightAndDockHotkeyTogglesBottom(t *testing.T) {
 	t.Parallel()
 
+	if got := New(nil).resultPanelPlacement; got != ui.PanelRight {
+		t.Fatalf("new model result panel placement = %v, want right", got)
+	}
+
 	m := resultPanelTestModel()
-	bottomLayout := m.mainLayout()
-	bottomPage := m.referencePageSize()
+	rightLayout := m.mainLayout()
+	rightPage := m.referencePageSize()
+	if rightLayout.ResultPanelX <= 0 {
+		t.Fatal("result panel did not open on the right")
+	}
 
 	next, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlW})
 	m = next.(Model)
-	if m.resultPanelPlacement != ui.PanelRight {
-		t.Fatal("ctrl+w did not dock the result panel right")
+	if m.resultPanelPlacement != ui.PanelBottom {
+		t.Fatal("ctrl+w did not dock the result panel at the bottom")
 	}
-	rightLayout := m.mainLayout()
-	if rightLayout.ResultPanelX <= 0 || rightLayout.ResultPanelHeight <= bottomLayout.ResultPanelHeight {
+	bottomLayout := m.mainLayout()
+	if bottomLayout.ResultPanelX != 0 || rightLayout.ResultPanelHeight <= bottomLayout.ResultPanelHeight {
 		t.Fatalf("right geometry = x%d h%d; bottom h%d",
 			rightLayout.ResultPanelX, rightLayout.ResultPanelHeight, bottomLayout.ResultPanelHeight)
 	}
-	if page := m.referencePageSize(); page <= bottomPage {
-		t.Fatalf("right panel page = %d, bottom page = %d; want more rows", page, bottomPage)
+	if bottomPage := m.referencePageSize(); rightPage <= bottomPage {
+		t.Fatalf("right panel page = %d, bottom page = %d; want more rows", rightPage, bottomPage)
 	}
 
 	next, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlW})
 	m = next.(Model)
-	if m.resultPanelPlacement != ui.PanelBottom {
-		t.Fatal("second ctrl+w did not return the result panel to the bottom")
+	if m.resultPanelPlacement != ui.PanelRight {
+		t.Fatal("second ctrl+w did not return the result panel to the right")
 	}
 }
 

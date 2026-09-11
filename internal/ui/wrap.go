@@ -117,6 +117,76 @@ func decimalWidth(n int) int {
 	return width
 }
 
+// RowTextPositionAt maps a mouse cell within a rendered source row to the
+// closest rune column in that row's text. baseline identifies the selected
+// side of a split row. Gutter clicks land at column zero and clicks beyond
+// the text land one past its end, leaving the caller to apply its normal- or
+// insert-mode cursor bounds.
+func RowTextPositionAt(row Row, x, wrapIndex, width int) (column int, baseline bool, ok bool) {
+	if x < 0 || x >= width || wrapIndex < 0 || width <= 0 || !row.IsLineRow() {
+		return 0, false, false
+	}
+
+	if row.Kind == RowLine {
+		baseline = row.Line.Kind == diff.LineDelete
+		textColumn := wrapIndex*width + x - unifiedRowPrefixWidth(row)
+		return runeIndexAtDisplayColumn(row.Line.Content, max(0, textColumn)), baseline, true
+	}
+
+	lw, rw, split := PairColumnWidths(width)
+	if !split {
+		// A narrow pair row is rendered through the unified fallback using its
+		// primary line (current side when present, otherwise baseline).
+		baseline = row.Right == nil
+		textColumn := wrapIndex*width + x - unifiedRowPrefixWidth(row)
+		return runeIndexAtDisplayColumn(row.Line.Content, max(0, textColumn)), baseline, true
+	}
+
+	leftEnd := PairLeftCellEnd(lw)
+	if x < leftEnd {
+		if row.Left != nil {
+			leftStart := leftEnd - lw
+			textColumn := wrapIndex*lw + x - leftStart
+			return runeIndexAtDisplayColumn(row.Left.Content, max(0, textColumn)), true, true
+		}
+		// The nearest text to a blank left cell starts on the right.
+		if row.Right != nil {
+			return 0, false, true
+		}
+		return 0, false, false
+	}
+
+	if row.Right != nil {
+		rightStart := width - rw
+		textColumn := wrapIndex*rw + x - rightStart
+		return runeIndexAtDisplayColumn(row.Right.Content, max(0, textColumn)), false, true
+	}
+	if row.Left != nil {
+		// The nearest text to a blank right cell is the end of the left line.
+		return len([]rune(row.Left.Content)), true, true
+	}
+	return 0, false, false
+}
+
+// runeIndexAtDisplayColumn converts a terminal-cell offset over the rendered
+// (tab-expanded) text to the rune occupying that cell. Wide runes own all of
+// their cells; an offset at or beyond the end returns the one-past-end index.
+func runeIndexAtDisplayColumn(text string, column int) int {
+	runes := []rune(text)
+	displayColumn := 0
+	for i, r := range runes {
+		width := runewidth.RuneWidth(r)
+		if r == '\t' {
+			width = 4
+		}
+		if width > 0 && column < displayColumn+width {
+			return i
+		}
+		displayColumn += max(0, width)
+	}
+	return len(runes)
+}
+
 // wrappedTextHeight matches wrapLine's forceful wrapping with PreserveSpace.
 // Tabs are four spaces, and suffixWidth represents trailing ASCII columns.
 func wrappedTextHeight(text string, limit, prefixWidth, suffixWidth int) int {

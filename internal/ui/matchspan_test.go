@@ -39,7 +39,7 @@ func TestApplyMatchSpansRestoresRowBackground(t *testing.T) {
 	// restore it (not default) after the span.
 	cursorBg, _ := backgroundSequence(colorCursor)
 	line := withPersistentBackground(padRight("some content here", 40), colorCursor)
-	got := applyMatchSpans(line, []MatchSpan{{RowIdx: 0, Start: 0, End: 4, Current: true}}, 0, 40, colorCursor)
+	got := applyMatchSpans(line, []MatchSpan{{RowIdx: 0, Start: 0, End: 4, Current: true}}, 0, 40, diffRowPrefixWidth, colorCursor)
 
 	if !strings.Contains(got, searchCurrentBgSeq) {
 		t.Fatalf("current-match bg missing: %q", got)
@@ -58,7 +58,7 @@ func TestApplyMatchSpansOffsetsByGutterAndWrap(t *testing.T) {
 	width := 30
 	// Content column 0 sits at diffRowPrefixWidth on the first wrapped line.
 	line := padRight(strings.Repeat("x", width), width)
-	first := applyMatchSpans(line, []MatchSpan{{Start: 0, End: 2}}, 0, width, lipgloss.Color(""))
+	first := applyMatchSpans(line, []MatchSpan{{Start: 0, End: 2}}, 0, width, diffRowPrefixWidth, lipgloss.Color(""))
 	if !strings.Contains(first, searchMatchBgSeq) {
 		t.Fatalf("span on first wrap line missing: %q", first)
 	}
@@ -68,14 +68,14 @@ func TestApplyMatchSpansOffsetsByGutterAndWrap(t *testing.T) {
 	}
 
 	// The same span on the second wrapped line is off-screen: no overlay.
-	second := applyMatchSpans(line, []MatchSpan{{Start: 0, End: 2}}, 1, width, lipgloss.Color(""))
+	second := applyMatchSpans(line, []MatchSpan{{Start: 0, End: 2}}, 1, width, diffRowPrefixWidth, lipgloss.Color(""))
 	if strings.Contains(second, searchMatchBgSeq) {
 		t.Fatalf("span leaked onto later wrap line: %q", second)
 	}
 
 	// A span past the first line lands on the second at the shifted offset.
 	span := MatchSpan{Start: width - diffRowPrefixWidth + 3, End: width - diffRowPrefixWidth + 6}
-	wrapped := applyMatchSpans(line, []MatchSpan{span}, 1, width, lipgloss.Color(""))
+	wrapped := applyMatchSpans(line, []MatchSpan{span}, 1, width, diffRowPrefixWidth, lipgloss.Color(""))
 	if !strings.Contains(wrapped, searchMatchBgSeq) {
 		t.Fatalf("span missing on second wrap line: %q", wrapped)
 	}

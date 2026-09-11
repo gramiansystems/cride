@@ -145,6 +145,33 @@ func TestInsertModeTypesAndSaves(t *testing.T) {
 	}
 }
 
+func TestInsertModeMouseClickSetsTypingPosition(t *testing.T) {
+	t.Parallel()
+
+	m := editTestModel(t, "hello")
+	m = press(m, "i")
+	rows := m.currentRows()
+	layout := m.mainLayout()
+	l := m.layoutFor(rows)
+	y := layout.DiffRowsY + l.RowStart(m.cursor) - m.topScreenLine(l)
+
+	next, _ := m.handleMouse(tea.MouseMsg{
+		X:      layout.DiffContentX + 18 + 3,
+		Y:      y,
+		Button: tea.MouseButtonLeft,
+		Action: tea.MouseActionPress,
+		Type:   tea.MouseLeft,
+	})
+	m = next.(Model)
+	if m.col != 3 {
+		t.Fatalf("typing cursor after click = %d, want 3", m.col)
+	}
+	m = typeText(m, "X")
+	if got := bufferLines(t, m)[0]; got != "helXlo" {
+		t.Fatalf("line after click and type = %q, want helXlo", got)
+	}
+}
+
 func TestEnteringEditPreservesCursorScreenRow(t *testing.T) {
 	t.Parallel()
 

@@ -175,6 +175,56 @@ func TestSplitActiveSideSelectsSymbolSide(t *testing.T) {
 	}
 }
 
+func TestMouseClickSplitTextSelectsSideAndColumn(t *testing.T) {
+	t.Parallel()
+
+	m := pressZS(Model{files: []diff.FileDiff{splitTestFile("a.go")}, width: 140, height: 24})
+	rows := m.currentRows()
+	rowIdx := -1
+	for i, row := range rows {
+		if row.Kind == ui.RowPair && row.Left != nil && row.Right != nil && row.Left != row.Right {
+			rowIdx = i
+			break
+		}
+	}
+	if rowIdx < 0 {
+		t.Fatal("changed split pair not found")
+	}
+	layout := m.mainLayout()
+	l := m.layoutFor(rows)
+	y := layout.DiffRowsY + l.RowStart(rowIdx) - m.topScreenLine(l)
+	lw, rw, ok := ui.PairColumnWidths(layout.DiffContentWidth)
+	if !ok {
+		t.Fatal("test layout does not support split view")
+	}
+	leftStart := ui.PairLeftCellEnd(lw) - lw
+	rightStart := layout.DiffContentWidth - rw
+
+	next, _ := m.handleMouse(tea.MouseMsg{
+		X:      layout.DiffContentX + leftStart + 4,
+		Y:      y,
+		Button: tea.MouseButtonLeft,
+		Action: tea.MouseActionPress,
+		Type:   tea.MouseLeft,
+	})
+	got := next.(Model)
+	if got.cursor != rowIdx || !got.splitActiveLeft || got.col != 4 {
+		t.Fatalf("left click = row %d side-left %v col %d, want row %d side-left true col 4", got.cursor, got.splitActiveLeft, got.col, rowIdx)
+	}
+
+	next, _ = got.handleMouse(tea.MouseMsg{
+		X:      layout.DiffContentX + rightStart + 2,
+		Y:      y,
+		Button: tea.MouseButtonLeft,
+		Action: tea.MouseActionPress,
+		Type:   tea.MouseLeft,
+	})
+	got = next.(Model)
+	if got.cursor != rowIdx || got.splitActiveLeft || got.col != 2 {
+		t.Fatalf("right click = row %d side-left %v col %d, want row %d side-left false col 2", got.cursor, got.splitActiveLeft, got.col, rowIdx)
+	}
+}
+
 func symbolNames(queries []navsearch.SymbolQuery) []string {
 	names := make([]string, 0, len(queries))
 	for _, q := range queries {

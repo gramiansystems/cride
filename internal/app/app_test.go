@@ -917,6 +917,31 @@ func TestMouseClickDiffRowsMovesCursor(t *testing.T) {
 	}
 }
 
+func TestMouseClickDiffTextMovesCharacterCursor(t *testing.T) {
+	t.Parallel()
+
+	m := cursorTestModel()
+	rows := m.currentRows()
+	rowIdx := m.cursor
+	m.setCursorCol(len([]rune(rows[rowIdx].Line.Content)) - 1)
+	layout := m.mainLayout()
+	l := m.layoutFor(rows)
+	y := layout.DiffRowsY + l.RowStart(rowIdx) - m.topScreenLine(l)
+
+	next, _ := m.handleMouse(tea.MouseMsg{
+		// Unified source text starts after the 18-cell diff gutter.
+		X:      layout.DiffContentX + 18 + 5,
+		Y:      y,
+		Button: tea.MouseButtonLeft,
+		Action: tea.MouseActionPress,
+		Type:   tea.MouseLeft,
+	})
+	got := next.(Model)
+	if got.cursor != rowIdx || got.col != 5 {
+		t.Fatalf("cursor after text click = row %d col %d, want row %d col 5", got.cursor, got.col, rowIdx)
+	}
+}
+
 func TestSearchResultJumpLoadsFullFileAndPositionsCursor(t *testing.T) {
 	t.Parallel()
 

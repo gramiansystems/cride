@@ -117,6 +117,107 @@ func TestRowScreenHeightMatchesRenderedRows(t *testing.T) {
 	}
 }
 
+func TestRowTextPositionAtUnifiedText(t *testing.T) {
+	t.Parallel()
+
+	row := Row{
+		Kind: RowLine,
+		Line: diff.Line{Kind: diff.LineContext, Content: "a\t界z", OldLine: 1, NewLine: 1},
+	}
+	for _, tt := range []struct {
+		name string
+		x    int
+		want int
+	}{
+		{name: "gutter", x: 4, want: 0},
+		{name: "first rune", x: diffRowPrefixWidth, want: 0},
+		{name: "tab first cell", x: diffRowPrefixWidth + 1, want: 1},
+		{name: "tab last cell", x: diffRowPrefixWidth + 4, want: 1},
+		{name: "wide rune first cell", x: diffRowPrefixWidth + 5, want: 2},
+		{name: "wide rune second cell", x: diffRowPrefixWidth + 6, want: 2},
+		{name: "following rune", x: diffRowPrefixWidth + 7, want: 3},
+		{name: "end of line", x: diffRowPrefixWidth + 8, want: 4},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got, baseline, ok := RowTextPositionAt(row, tt.x, 0, 40)
+			if !ok || baseline || got != tt.want {
+				t.Fatalf("RowTextPositionAt(x=%d) = (%d, %v, %v), want (%d, false, true)", tt.x, got, baseline, ok, tt.want)
+			}
+		})
+	}
+}
+
+func TestRowTextPositionAtWrappedAndWideGutter(t *testing.T) {
+	t.Parallel()
+
+	row := Row{
+		Kind: RowLine,
+		Line: diff.Line{Kind: diff.LineContext, Content: "0123456789abcdef", OldLine: 12345, NewLine: 67890},
+	}
+	// Five-digit old and new line numbers widen the normal 18-cell gutter to
+	// 20 cells. At width 24, wrapped screen line 1 therefore starts at rune 4.
+	got, baseline, ok := RowTextPositionAt(row, 3, 1, 24)
+	if !ok || baseline || got != 7 {
+		t.Fatalf("wrapped hit = (%d, %v, %v), want (7, false, true)", got, baseline, ok)
+	}
+}
+
+func TestRowTextPositionAtSplitSides(t *testing.T) {
+	t.Parallel()
+
+	left := diff.Line{Kind: diff.LineDelete, Content: "old\t界", OldLine: 1}
+	right := diff.Line{Kind: diff.LineAdd, Content: "new value", NewLine: 1}
+	row := Row{Kind: RowPair, Line: right, Left: &left, Right: &right}
+	width := 80
+	lw, rw, ok := PairColumnWidths(width)
+	if !ok {
+		t.Fatal("test width does not support split view")
+	}
+	leftStart := PairLeftCellEnd(lw) - lw
+	rightStart := width - rw
+
+	got, baseline, hit := RowTextPositionAt(row, leftStart+4, 0, width)
+	if !hit || !baseline || got != 3 {
+		t.Fatalf("left hit = (%d, %v, %v), want tab at (3, true, true)", got, baseline, hit)
+	}
+	got, baseline, hit = RowTextPositionAt(row, rightStart+5, 0, width)
+	if !hit || baseline || got != 5 {
+		t.Fatalf("right hit = (%d, %v, %v), want (5, false, true)", got, baseline, hit)
+	}
+
+	// Each split cell wraps independently and repeats its gutter. A click
+	// three cells into the second left screen line lands on rune lw+3.
+	left.Content = strings.Repeat("x", lw+8)
+	got, baseline, hit = RowTextPositionAt(row, leftStart+3, 1, width)
+	if !hit || !baseline || got != lw+3 {
+		t.Fatalf("wrapped left hit = (%d, %v, %v), want (%d, true, true)", got, baseline, hit, lw+3)
+	}
+}
+
+func TestRowTextPositionAtSplitBlankCellUsesNearestText(t *testing.T) {
+	t.Parallel()
+
+	left := diff.Line{Kind: diff.LineDelete, Content: "left", OldLine: 1}
+	right := diff.Line{Kind: diff.LineAdd, Content: "right", NewLine: 1}
+	width := 80
+	lw, _, ok := PairColumnWidths(width)
+	if !ok {
+		t.Fatal("test width does not support split view")
+	}
+
+	row := Row{Kind: RowPair, Line: right, Right: &right}
+	got, baseline, hit := RowTextPositionAt(row, 2, 0, width)
+	if !hit || baseline || got != 0 {
+		t.Fatalf("blank left hit = (%d, %v, %v), want right start", got, baseline, hit)
+	}
+
+	row = Row{Kind: RowPair, Line: left, Left: &left}
+	got, baseline, hit = RowTextPositionAt(row, PairLeftCellEnd(lw)+1, 0, width)
+	if !hit || !baseline || got != len([]rune(left.Content)) {
+		t.Fatalf("blank right hit = (%d, %v, %v), want left end", got, baseline, hit)
+	}
+}
+
 func TestDiffLinesHonorTopWrap(t *testing.T) {
 	t.Parallel()
 

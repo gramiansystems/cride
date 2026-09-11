@@ -70,12 +70,3 @@ func (m *Model) toggleSplitView() tea.Cmd {
 func (m *Model) setSplitActiveSide(left bool) {
 	m.splitActiveLeft = left
 }
-
-// splitSideForClick resolves which column a diff-content x offset landed in.
-func splitSideForClick(xInContent, contentWidth int) (left bool, ok bool) {
-	lw, _, valid := ui.PairColumnWidths(contentWidth)
-	if !valid {
-		return false, false
-	}
-	return xInContent < ui.PairLeftCellEnd(lw), true
-}

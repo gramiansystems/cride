@@ -95,7 +95,7 @@ var Groups = []Group{
 		{"wheel", "Scroll the code pane or active result panel"},
 		{"drag panel border", "Resize the change list or active result panel"},
 		{"click file list", "Select a changed file"},
-		{"click code row", "Move the cursor to that row"},
+		{"click code", "Move the cursor to the clicked text position"},
 		{"click comment [ ] / [edit]", "Mark a comment done/reopen it, or edit it"},
 	}},
 	{"App", []Binding{

@@ -123,6 +123,43 @@ func TestWrappedMouseClickSelectsOwningRow(t *testing.T) {
 	}
 }
 
+func TestWrappedMouseClickMovesCharacterCursor(t *testing.T) {
+	t.Parallel()
+
+	content := strings.Repeat("0123456789", 8)
+	file := diff.FileDiff{
+		OldPath: "a.go",
+		NewPath: "a.go",
+		Status:  diff.FileModified,
+		Hunks: []diff.Hunk{{
+			Header: "@@ -1 +1 @@",
+			Lines:  []diff.Line{{Kind: diff.LineContext, Content: content, OldLine: 1, NewLine: 1}},
+		}},
+	}
+	m := Model{files: []diff.FileDiff{file}, width: 60, height: 20}
+	rows := m.currentRows()
+	rowIdx := 1
+	layout := m.mainLayout()
+	l := m.layoutFor(rows)
+	if l.RowHeight(rowIdx) < 2 {
+		t.Fatal("test source row did not wrap")
+	}
+
+	next, _ := m.handleMouse(tea.MouseMsg{
+		// The content width is 28. After the 18-cell gutter, clicking x=3 on
+		// wrap line 1 addresses source display column 28+3-18 = 13.
+		X:      layout.DiffContentX + 3,
+		Y:      layout.DiffRowsY + l.RowStart(rowIdx) + 1,
+		Button: tea.MouseButtonLeft,
+		Action: tea.MouseActionPress,
+		Type:   tea.MouseLeft,
+	})
+	got := next.(Model)
+	if got.cursor != rowIdx || got.col != 13 {
+		t.Fatalf("cursor after wrapped click = row %d col %d, want row %d col 13", got.cursor, got.col, rowIdx)
+	}
+}
+
 func TestResizePreservesCursorVisibility(t *testing.T) {
 	t.Parallel()
 

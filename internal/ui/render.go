@@ -699,9 +699,9 @@ func renderDiffRows(files []diff.FileDiff, rows []Row, cursor, top, topWrap, wid
 			if len(rowSpans) > 0 {
 				switch rows[i].Kind {
 				case RowLine:
-					line = applyMatchSpans(line, rowSpans, wrapOffset+k, width, baseBg)
+					line = applyMatchSpans(line, rowSpans, wrapOffset+k, width, unifiedRowPrefixWidth(rows[i]), baseBg)
 				case RowPair:
-					line = applyPairMatchSpans(line, rowSpans, wrapOffset+k, width, baseBg)
+					line = applyPairMatchSpans(line, rowSpans, wrapOffset+k, width, unifiedRowPrefixWidth(rows[i]), baseBg)
 				}
 			}
 			out = append(out, line)

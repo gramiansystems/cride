@@ -391,21 +391,22 @@ func NewWithOptions(src diffsource.Source, opts Options) Model {
 		clearStaleEditLock(src.Root())
 	}
 	return Model{
-		source:           src,
-		hl:               opts.Highlighter,
-		lsp:              opts.LSP,
-		outlineExtractor: opts.Outline,
-		freshSession:     opts.FreshSession,
-		changeOrder:      ui.DefaultChangeListOrder,
-		loading:          true,
-		loadInFlight:     true,
-		fileStates:       make(map[fileStateKey]fileState),
-		fileContents:     make(map[string]fileContentState),
-		localExpansions:  make(map[string]map[int]int),
-		diffViewOrigins:  make(map[string]diffViewPosition),
-		fileViewAnchors:  make(map[string]fileViewAnchor),
-		diagnostics:      make(map[string][]lsp.Diagnostic),
-		lspStatuses:      make(map[string]lsp.Status),
+		source:               src,
+		hl:                   opts.Highlighter,
+		lsp:                  opts.LSP,
+		outlineExtractor:     opts.Outline,
+		freshSession:         opts.FreshSession,
+		changeOrder:          ui.DefaultChangeListOrder,
+		resultPanelPlacement: ui.PanelRight,
+		loading:              true,
+		loadInFlight:         true,
+		fileStates:           make(map[fileStateKey]fileState),
+		fileContents:         make(map[string]fileContentState),
+		localExpansions:      make(map[string]map[int]int),
+		diffViewOrigins:      make(map[string]diffViewPosition),
+		fileViewAnchors:      make(map[string]fileViewAnchor),
+		diagnostics:          make(map[string][]lsp.Diagnostic),
+		lspStatuses:          make(map[string]lsp.Status),
 	}
 }
 
@@ -2402,9 +2403,17 @@ func (m Model) handleMouseClick(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 				return m, m.openCommentEditor()
 			}
 		}
-		if m.cursor >= 0 && m.cursor < len(rows) && rows[m.cursor].Kind == ui.RowPair {
-			if left, ok := splitSideForClick(msg.X-layout.DiffContentX, layout.DiffContentWidth); ok {
-				m.setSplitActiveSide(left)
+		if m.cursor >= 0 && m.cursor < len(rows) {
+			if col, baseline, ok := ui.RowTextPositionAt(
+				rows[m.cursor],
+				msg.X-layout.DiffContentX,
+				screenLine.WrapIdx,
+				layout.DiffContentWidth,
+			); ok {
+				if rows[m.cursor].Kind == ui.RowPair {
+					m.setSplitActiveSide(baseline)
+				}
+				m.setCursorCol(col)
 			}
 		}
 		m.clampScroll()

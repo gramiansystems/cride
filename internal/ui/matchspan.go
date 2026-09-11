@@ -53,7 +53,7 @@ func matchSpansByRow(spans []MatchSpan) map[int][]MatchSpan {
 // use content columns, so the gutter prefix is added here. baseBg (may be
 // empty) is re-asserted after each span so cursor/change-row backgrounds
 // survive the overlay.
-func applyMatchSpans(line string, spans []MatchSpan, wrapIdx, width int, baseBg lipgloss.Color) string {
+func applyMatchSpans(line string, spans []MatchSpan, wrapIdx, width, contentOffset int, baseBg lipgloss.Color) string {
 	if len(spans) == 0 || width <= 0 {
 		return line
 	}
@@ -63,8 +63,8 @@ func applyMatchSpans(line string, spans []MatchSpan, wrapIdx, width int, baseBg 
 	}
 	lineStart := wrapIdx * width
 	for _, span := range spans {
-		absStart := span.Start + diffRowPrefixWidth
-		absEnd := span.End + diffRowPrefixWidth
+		absStart := span.Start + contentOffset
+		absEnd := span.End + contentOffset
 		from := max(absStart-lineStart, 0)
 		to := min(absEnd-lineStart, width)
 		if to <= from || from >= width {
@@ -90,10 +90,10 @@ func spanBackground(span MatchSpan) string {
 // applyPairMatchSpans overlays match backgrounds on one screen line of a
 // side-by-side pair row. Each side's spans map into that side's column
 // window; MatchSideBoth spans render in both columns.
-func applyPairMatchSpans(line string, spans []MatchSpan, wrapIdx, width int, baseBg lipgloss.Color) string {
+func applyPairMatchSpans(line string, spans []MatchSpan, wrapIdx, width, unifiedContentOffset int, baseBg lipgloss.Color) string {
 	lw, rw, ok := PairColumnWidths(width)
 	if !ok {
-		return applyMatchSpans(line, spans, wrapIdx, width, baseBg)
+		return applyMatchSpans(line, spans, wrapIdx, width, unifiedContentOffset, baseBg)
 	}
 	restore := "\x1b[49m"
 	if bg, ok := backgroundSequence(baseBg); ok {
