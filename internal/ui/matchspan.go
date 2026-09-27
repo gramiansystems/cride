@@ -37,6 +37,10 @@ type MatchSpan struct {
 // diagnostic marker, sign, and separators.
 const diffRowPrefixWidth = 18
 
+// BlameGutterWidth is the terminal width reserved by the optional blame
+// margin, including its divider and trailing space.
+const BlameGutterWidth = 34
+
 func matchSpansByRow(spans []MatchSpan) map[int][]MatchSpan {
 	if len(spans) == 0 {
 		return nil
@@ -91,7 +95,11 @@ func spanBackground(span MatchSpan) string {
 // side-by-side pair row. Each side's spans map into that side's column
 // window; MatchSideBoth spans render in both columns.
 func applyPairMatchSpans(line string, spans []MatchSpan, wrapIdx, width, unifiedContentOffset int, baseBg lipgloss.Color) string {
-	lw, rw, ok := PairColumnWidths(width)
+	return applyPairMatchSpansWithGutter(line, spans, wrapIdx, width, unifiedContentOffset, baseBg, 0)
+}
+
+func applyPairMatchSpansWithGutter(line string, spans []MatchSpan, wrapIdx, width, unifiedContentOffset int, baseBg lipgloss.Color, gutterWidth int) string {
+	lw, rw, ok := PairColumnWidths(width - gutterWidth)
 	if !ok {
 		return applyMatchSpans(line, spans, wrapIdx, width, unifiedContentOffset, baseBg)
 	}
@@ -99,8 +107,8 @@ func applyPairMatchSpans(line string, spans []MatchSpan, wrapIdx, width, unified
 	if bg, ok := backgroundSequence(baseBg); ok {
 		restore = bg
 	}
-	leftOffset := pairRelWidth + pairColPrefix
-	rightOffset := pairRelWidth + pairColPrefix + lw + pairDividerWidth + pairColPrefix
+	leftOffset := gutterWidth + pairRelWidth + pairColPrefix
+	rightOffset := gutterWidth + pairRelWidth + pairColPrefix + lw + pairDividerWidth + pairColPrefix
 
 	apply := func(line string, span MatchSpan, cellOffset, cellWidth int) string {
 		lineStart := wrapIdx * cellWidth

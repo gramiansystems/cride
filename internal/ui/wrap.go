@@ -54,7 +54,7 @@ func BuildWrapLayout(files []diff.FileDiff, rows []Row, width int) *WrapLayout {
 // is counted rune-by-rune to preserve hard-wrap behavior around wide glyphs.
 func rowScreenHeight(files []diff.FileDiff, row Row, width int) int {
 	if row.Kind == RowPair {
-		lw, rw, ok := PairColumnWidths(width)
+		lw, rw, ok := PairColumnWidths(width - blameGutterWidth(row))
 		if ok {
 			left, right := 0, 0
 			if row.Left != nil {
@@ -77,19 +77,19 @@ func rowScreenHeight(files []diff.FileDiff, row Row, width int) int {
 		file := files[row.FileIdx]
 		// "    M " + path + "  +<adds> -<deletes>"
 		suffix := 5 + decimalWidth(file.Added) + decimalWidth(file.Deleted)
-		return wrappedTextHeight(file.Path(), width, 6, suffix)
+		return wrappedTextHeight(file.Path(), width, blameGutterWidth(row)+6, suffix)
 	case RowHunkHeader:
-		return wrappedTextHeight(row.Text, width, 4, 0)
+		return wrappedTextHeight(row.Text, width, blameGutterWidth(row)+4, 0)
 	case RowComment:
 		// Comment rows use fourteen spaces followed by "┃ ".
-		return wrappedTextHeight(row.Text, width, diffRowPrefixWidth-2, 0)
+		return wrappedTextHeight(row.Text, width, blameGutterWidth(row)+diffRowPrefixWidth-2, 0)
 	default:
 		return wrappedTextHeight(row.Line.Content, width, unifiedRowPrefixWidth(row), 0)
 	}
 }
 
 func unifiedRowPrefixWidth(row Row) int {
-	width := diffRowPrefixWidth
+	width := diffRowPrefixWidth + blameGutterWidth(row)
 	line := row.Line
 	if line.Kind != diff.LineAdd {
 		width += max(0, decimalWidth(line.OldLine)-4)
@@ -133,7 +133,8 @@ func RowTextPositionAt(row Row, x, wrapIndex, width int) (column int, baseline b
 		return runeIndexAtDisplayColumn(row.Line.Content, max(0, textColumn)), baseline, true
 	}
 
-	lw, rw, split := PairColumnWidths(width)
+	gutterWidth := blameGutterWidth(row)
+	lw, rw, split := PairColumnWidths(width - gutterWidth)
 	if !split {
 		// A narrow pair row is rendered through the unified fallback using its
 		// primary line (current side when present, otherwise baseline).
@@ -142,7 +143,10 @@ func RowTextPositionAt(row Row, x, wrapIndex, width int) (column int, baseline b
 		return runeIndexAtDisplayColumn(row.Line.Content, max(0, textColumn)), baseline, true
 	}
 
-	leftEnd := PairLeftCellEnd(lw)
+	if x < gutterWidth {
+		return 0, true, true
+	}
+	leftEnd := gutterWidth + PairLeftCellEnd(lw)
 	if x < leftEnd {
 		if row.Left != nil {
 			leftStart := leftEnd - lw

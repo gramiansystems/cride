@@ -147,6 +147,34 @@ func TestRowTextPositionAtUnifiedText(t *testing.T) {
 	}
 }
 
+func TestBlameGutterRendersAndOffsetsUnifiedHitTesting(t *testing.T) {
+	t.Parallel()
+
+	row := Row{
+		Kind:        RowLine,
+		BlameGutter: true,
+		BlameText:   "abcdef0 2026-09-23 12:34 Ada",
+		Line:        diff.Line{Kind: diff.LineContext, Content: "hello", OldLine: 1, NewLine: 1},
+	}
+	plain := stripANSI(renderRow([]diff.FileDiff{{OldPath: "a.go", NewPath: "a.go"}}, row, nil, 0, 0))
+	prefix := string([]rune(plain)[:min(len([]rune(plain)), BlameGutterWidth)])
+	if !strings.HasPrefix(plain, "abcdef0 2026-09-23 12:34 Ada") || !strings.Contains(prefix, "│") {
+		t.Fatalf("rendered blame gutter = %q", prefix)
+	}
+	got, baseline, ok := RowTextPositionAt(row, BlameGutterWidth+diffRowPrefixWidth+2, 0, 80)
+	if !ok || baseline || got != 2 {
+		t.Fatalf("blame-offset hit = (%d, %v, %v), want (2, false, true)", got, baseline, ok)
+	}
+	got, _, ok = RowTextPositionAt(row, 3, 0, 80)
+	if !ok || got != 0 {
+		t.Fatalf("blame gutter hit = (%d, %v), want column zero", got, ok)
+	}
+	files := []diff.FileDiff{{OldPath: "a.go", NewPath: "a.go"}}
+	if measured, rendered := rowScreenHeight(files, row, 48), len(rowScreenLines(files, row, nil, 0, 0, 48)); measured != rendered {
+		t.Fatalf("blame row measured %d lines, rendered %d", measured, rendered)
+	}
+}
+
 func TestRowTextPositionAtWrappedAndWideGutter(t *testing.T) {
 	t.Parallel()
 
@@ -191,6 +219,34 @@ func TestRowTextPositionAtSplitSides(t *testing.T) {
 	got, baseline, hit = RowTextPositionAt(row, leftStart+3, 1, width)
 	if !hit || !baseline || got != lw+3 {
 		t.Fatalf("wrapped left hit = (%d, %v, %v), want (%d, true, true)", got, baseline, hit, lw+3)
+	}
+}
+
+func TestRowTextPositionAtSplitWithBlameGutter(t *testing.T) {
+	t.Parallel()
+
+	left := diff.Line{Kind: diff.LineDelete, Content: "old value", OldLine: 1}
+	right := diff.Line{Kind: diff.LineAdd, Content: "new value", NewLine: 1}
+	row := Row{Kind: RowPair, Line: right, Left: &left, Right: &right, BlameGutter: true, BlameText: "abcdef0 2d Ada"}
+	width := 100
+	lw, rw, ok := PairColumnWidths(width - BlameGutterWidth)
+	if !ok {
+		t.Fatal("test width does not support split view")
+	}
+	leftStart := BlameGutterWidth + PairLeftCellEnd(lw) - lw
+	rightStart := width - rw
+
+	got, baseline, hit := RowTextPositionAt(row, leftStart+3, 0, width)
+	if !hit || !baseline || got != 3 {
+		t.Fatalf("left hit = (%d, %v, %v), want (3, true, true)", got, baseline, hit)
+	}
+	got, baseline, hit = RowTextPositionAt(row, rightStart+3, 0, width)
+	if !hit || baseline || got != 3 {
+		t.Fatalf("right hit = (%d, %v, %v), want (3, false, true)", got, baseline, hit)
+	}
+	lines := rowScreenLines([]diff.FileDiff{{OldPath: "a.go", NewPath: "a.go"}}, row, nil, 0, 0, width)
+	if !strings.HasPrefix(stripANSI(lines[0]), "abcdef0 2d Ada") {
+		t.Fatalf("split row missing blame gutter: %q", stripANSI(lines[0]))
 	}
 }
 

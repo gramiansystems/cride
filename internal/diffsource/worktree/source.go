@@ -112,6 +112,9 @@ func (s *Source) Baseline() string {
 	return shortRef(s.baseline)
 }
 
+// BaselineRef returns the pinned baseline object used for reads and blame.
+func (s *Source) BaselineRef() string { return s.baseline }
+
 // Diff returns the unified review diff. Worktree mode includes untracked,
 // non-ignored files; immutable mode compares the two selected git objects.
 func (s *Source) Diff() ([]byte, error) {

@@ -110,6 +110,8 @@ type Model struct {
 
 	fileStates        map[fileStateKey]fileState
 	fileContents      map[string]fileContentState
+	blames            map[string]blameFileState
+	blameGutter       bool
 	localExpansions   map[string]map[int]int
 	diffViewOrigins   map[string]diffViewPosition
 	fileViewAnchors   map[string]fileViewAnchor
@@ -402,6 +404,7 @@ func NewWithOptions(src diffsource.Source, opts Options) Model {
 		loadInFlight:         true,
 		fileStates:           make(map[fileStateKey]fileState),
 		fileContents:         make(map[string]fileContentState),
+		blames:               make(map[string]blameFileState),
 		localExpansions:      make(map[string]map[int]int),
 		diffViewOrigins:      make(map[string]diffViewPosition),
 		fileViewAnchors:      make(map[string]fileViewAnchor),
@@ -585,33 +588,35 @@ func (m Model) loadCmdSeq(seq int) tea.Cmd {
 }
 
 func (m *Model) ensureCurrentFileContentCmd() tea.Cmd {
+	blameCmd := m.ensureCurrentBlameCmd()
 	if !m.currentFileNeedsContent() || m.source == nil || m.selectedFile < 0 || m.selectedFile >= len(m.files) {
-		return nil
+		return blameCmd
 	}
 	f := m.files[m.selectedFile]
 	if f.Binary {
-		return nil
+		return blameCmd
 	}
 	path := f.Path()
 	if path == "" {
-		return nil
+		return blameCmd
 	}
 	if m.fileContents == nil {
 		m.fileContents = make(map[string]fileContentState)
 	}
 	if state, ok := m.fileContents[path]; ok && (state.loading || state.loaded || state.err != nil) {
-		return nil
+		return blameCmd
 	}
 	generation := m.contentGeneration
 	src := m.source
 	m.fileContents[path] = fileContentState{loading: true}
-	return func() tea.Msg {
+	contentCmd := func() tea.Msg {
 		content, err := src.CurrentContent(path)
 		if err != nil {
 			return fileContentLoadedMsg{path: path, generation: generation, err: err}
 		}
 		return fileContentLoadedMsg{path: path, generation: generation, lines: splitContentLines(content)}
 	}
+	return tea.Batch(contentCmd, blameCmd)
 }
 
 func (m *Model) loadProjectFilesCmd() tea.Cmd {
@@ -714,7 +719,10 @@ func (m *Model) resetToDiffFiles() tea.Cmd {
 	}
 	m.clampScroll()
 	m.syncChangeListScroll()
-	return m.notify(ui.ToastInfo, "file view reset to diff files")
+	return tea.Batch(
+		m.ensureCurrentFileContentCmd(),
+		m.notify(ui.ToastInfo, "file view reset to diff files"),
+	)
 }
 
 func mergeProjectFiles(reviewFiles []diff.FileDiff, paths []string) []diff.FileDiff {
@@ -1755,6 +1763,15 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case blameLoadedMsg:
+		if m.blames == nil {
+			m.blames = make(map[string]blameFileState)
+		}
+		m.blames[msg.path] = blameFileState{file: msg.file, err: msg.err, loaded: true}
+		m.rowsVersion++
+		m.clampScroll()
+		return m, nil
+
 	case projectFilesLoadedMsg:
 		m.projectFilesLoading = false
 		m.projectFilesErr = msg.err
@@ -2039,6 +2056,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		count, hasCount := m.consumeCount()
 		id := map[string]string{
 			"/": commandProjectSearch,
+			"b": commandToggleBlame,
 			"r": commandReferences,
 			"R": commandReferencesChanged,
 			"d": commandGoToDefinition,
@@ -2067,6 +2085,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.pendingZ = false
 		count, _ := m.consumeCount()
 		id := map[string]string{
+			"b": commandToggleBlame,
 			"o": commandExpandContext,
 			"c": commandCollapseContext,
 			"O": commandExpandContextAll,
@@ -3520,7 +3539,7 @@ func (m *Model) jumpToBaselineLocation(loc source.Location) (tea.Cmd, bool) {
 	}
 	m.clampScroll()
 	m.centerCursorInViewport()
-	return nil, true
+	return m.ensureCurrentFileContentCmd(), true
 }
 
 func (m *Model) jumpToLocation(loc source.Location) tea.Cmd {
@@ -4803,6 +4822,7 @@ func (m *Model) currentRows() []ui.Row {
 		rows = ui.PairRows(rows)
 	}
 	rows = m.withCommentRows(rows)
+	rows = m.withBlameRows(rows)
 	if m.rows == nil {
 		m.rows = &rowCacheState{entries: make(map[rowCacheKey][]ui.Row)}
 	}

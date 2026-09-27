@@ -61,6 +61,7 @@ const (
 	commandCallsIncoming         = "calls.incoming"
 	commandCallsOutgoing         = "calls.outgoing"
 	commandToggleAllFiles        = "files.toggle-all"
+	commandToggleBlame           = "view.toggle-blame"
 	commandChangeLine            = "edit.change-line"
 	commandChangeToLineEnd       = "edit.change-to-line-end"
 	commandCloseActivePanel      = "app.close-active-panel"
@@ -538,6 +539,9 @@ var commandCatalog = []Command{
 	command(commandToggleFileListOrder, "Toggle file-list order", "o", "Toggle between path and most-recently-changed order.", reviewOnly(func(c CommandContext) tea.Cmd {
 		return c.Model.toggleChangeListOrder()
 	})),
+	command(commandToggleBlame, "Toggle git blame margin", "gb / zb", "Show baseline commit age and author in the left margin.", reviewOnly(func(c CommandContext) tea.Cmd {
+		return c.Model.toggleBlameGutter()
+	})),
 	preserveCommandScroll(command(commandToggleFullFile, "Toggle full-file view", "tab / zf", "Toggle between diff and full-file views.", reviewOnly(func(c CommandContext) tea.Cmd {
 		return tea.Batch(c.Model.toggleViewMode(), c.Model.ensureCurrentFileContentCmd())
 	}))),
@@ -644,6 +648,7 @@ func commandPaletteCategory(id string) CommandCategory {
 		commandFocusChangeList,
 		commandFocusDiff,
 		commandToggleFullFile,
+		commandToggleBlame,
 		commandToggleResultDock,
 		commandToggleResultOrder,
 		commandToggleSideBySide:

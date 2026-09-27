@@ -36,6 +36,7 @@ type State struct {
 	Baseline      string               `json:"baseline,omitempty"`
 	SelectedFile  string               `json:"selected_file,omitempty"`
 	FullFileView  bool                 `json:"full_file_view,omitempty"`
+	BlameGutter   bool                 `json:"blame_gutter,omitempty"`
 	CollapsedDirs []string             `json:"collapsed_dirs,omitempty"`
 	SplitFiles    []string             `json:"split_files,omitempty"`
 	ChangeOrder   string               `json:"change_order,omitempty"`

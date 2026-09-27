@@ -53,6 +53,7 @@ var Groups = []Group{
 		{"zO/zC", "Expand or collapse context for all hunks in the file"},
 		{"tab, zf", "Toggle full-file view"},
 		{"zs", "Toggle side-by-side diff"},
+		{"gb, zb", "Toggle baseline git blame in the left margin"},
 		{"ctrl+w", "Dock the active result panel on the right or bottom"},
 		{"ctrl+r", "Reload the diff and import review.md"},
 	}},

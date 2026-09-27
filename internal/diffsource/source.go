@@ -37,6 +37,14 @@ type Watcher interface {
 	Watch(onChange func()) (stop func(), err error)
 }
 
+// BaselineReferencer is implemented by git-backed sources that can expose the
+// immutable object name behind their user-facing Baseline label. Enrichments
+// such as blame need the actual object: display labels may be abbreviated or
+// contain a comparison range.
+type BaselineReferencer interface {
+	BaselineRef() string
+}
+
 // TextSearcher is the optional user-facing text-search capability. Unlike
 // Source.Search, whose query is a regular expression used by lexical code
 // intelligence, SearchText treats the query literally and applies smart-case

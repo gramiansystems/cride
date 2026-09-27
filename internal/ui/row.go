@@ -25,6 +25,11 @@ type Row struct {
 	Text             string    // header/placeholder text for non-line rows
 	Changed          bool      // true for changed current lines in full-file view
 	DiagnosticMarker string
+	// BlameGutter reserves the optional left margin for this row. BlameText is
+	// populated on source rows and left empty on headers, comments, and lines
+	// without a baseline counterpart.
+	BlameGutter bool
+	BlameText   string
 	// Left/Right hold the two sides of a RowPair; nil is a blank cell.
 	Left  *diff.Line
 	Right *diff.Line

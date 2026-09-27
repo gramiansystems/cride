@@ -12,6 +12,7 @@ func testState() State {
 		Baseline:      "abc123",
 		SelectedFile:  "internal/app/app.go",
 		FullFileView:  true,
+		BlameGutter:   true,
 		CollapsedDirs: []string{"vendor"},
 		SplitFiles:    []string{"internal/app/app.go"},
 		ChangeOrder:   "change",
@@ -37,7 +38,7 @@ func TestSessionRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.SelectedFile != "internal/app/app.go" || !got.FullFileView {
+	if got.SelectedFile != "internal/app/app.go" || !got.FullFileView || !got.BlameGutter {
 		t.Fatalf("round trip lost view state: %+v", got)
 	}
 	fs := got.Files["internal/app/app.go"]

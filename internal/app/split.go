@@ -20,8 +20,16 @@ func (m *Model) splitViewActive() bool {
 	if !m.splitFiles[m.currentFilePath()] {
 		return false
 	}
-	_, _, ok := ui.PairColumnWidths(m.diffContentWidth())
+	_, _, ok := ui.PairColumnWidths(m.splitContentWidth())
 	return ok
+}
+
+func (m *Model) splitContentWidth() int {
+	width := m.diffContentWidth()
+	if m.blameGutter {
+		width -= ui.BlameGutterWidth
+	}
+	return width
 }
 
 // toggleSplitView flips side-by-side for the current file, re-anchoring the
@@ -36,7 +44,7 @@ func (m *Model) toggleSplitView() tea.Cmd {
 	}
 	enabling := !m.splitFiles[path]
 	if enabling {
-		if _, _, ok := ui.PairColumnWidths(m.diffContentWidth()); !ok {
+		if _, _, ok := ui.PairColumnWidths(m.splitContentWidth()); !ok {
 			return m.notify(ui.ToastWarn, "window too narrow for side-by-side")
 		}
 	}

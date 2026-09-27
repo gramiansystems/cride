@@ -95,6 +95,7 @@ func (m *Model) applySession(state session.State) bool {
 	if state.FullFileView {
 		m.viewMode = ViewFile
 	}
+	m.blameGutter = state.BlameGutter
 	if len(state.CollapsedDirs) > 0 {
 		m.collapsedDirs = make(map[string]bool, len(state.CollapsedDirs))
 		for _, dir := range state.CollapsedDirs {
@@ -188,6 +189,7 @@ func (m *Model) buildSessionState() session.State {
 		FormatVersion: session.FormatVersion,
 		SelectedFile:  m.currentFilePath(),
 		FullFileView:  m.viewMode == ViewFile,
+		BlameGutter:   m.blameGutter,
 	}
 	if m.source != nil {
 		state.Baseline = m.source.Baseline()

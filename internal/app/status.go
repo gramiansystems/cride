@@ -136,9 +136,9 @@ func (m Model) contextualHints() []string {
 	case m.mode == modeEdit:
 		return []string{"-- EDIT --", "`i`insert", "`dd`delete", "`o`open-line", "`esc`review"}
 	case m.pendingG:
-		return []string{"`g`top", "`d`def", "`r`refs", "`s`symbols", "`y`changes", "`e`diag"}
+		return []string{"`g`top", "`b`blame", "`d`def", "`r`refs", "`s`symbols", "`e`diag"}
 	case m.pendingZ:
-		return []string{"`o`expand", "`c`collapse", "`O`all+", "`C`reset", "`s`split", "`f`full"}
+		return []string{"`o`expand", "`c`collapse", "`b`blame", "`s`split", "`f`full"}
 	case m.pendingBracket > 0:
 		return []string{"`c`next-hunk", "`]`next-file"}
 	case m.pendingBracket < 0:

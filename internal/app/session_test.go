@@ -19,6 +19,7 @@ func TestSessionRestoreReanchorsAndRestoresState(t *testing.T) {
 
 	state := session.State{
 		SelectedFile:  "dir/b.go",
+		BlameGutter:   true,
 		CollapsedDirs: []string{"vendor"},
 		SplitFiles:    []string{"a.go"},
 		ChangeOrder:   "path",
@@ -43,8 +44,8 @@ func TestSessionRestoreReanchorsAndRestoresState(t *testing.T) {
 	if got := m.cursorScreenRow(); got != 4 {
 		t.Fatalf("cursor screen row = %d, want 4", got)
 	}
-	if !m.collapsedDirs["vendor"] || !m.splitFiles["a.go"] {
-		t.Fatalf("collapse/split not restored: %v %v", m.collapsedDirs, m.splitFiles)
+	if !m.collapsedDirs["vendor"] || !m.splitFiles["a.go"] || !m.blameGutter {
+		t.Fatalf("collapse/split/blame not restored: %v %v %v", m.collapsedDirs, m.splitFiles, m.blameGutter)
 	}
 	if m.changeOrder != ui.ChangeListOrderPath || m.changeClock != 4 || m.changeOrdinal["dir/b.go"] != 4 || m.changeHashes["a.go"] == "" {
 		t.Fatalf("change order not restored: order=%v clock=%d ord=%v hashes=%v", m.changeOrder, m.changeClock, m.changeOrdinal, m.changeHashes)
@@ -111,6 +112,7 @@ func TestBuildSessionStateMirrorsModel(t *testing.T) {
 	m.viewMode = ViewDiff
 	m.collapsedDirs = map[string]bool{"vendor": true}
 	m.splitFiles = map[string]bool{"a.go": true}
+	m.blameGutter = true
 	m.changeOrder = ui.ChangeListOrderPath
 	m.changeClock = 7
 	m.changeOrdinal = map[string]int{"a.go": 7}
@@ -131,7 +133,7 @@ func TestBuildSessionStateMirrorsModel(t *testing.T) {
 	if state.Files["b.go"].Expansions["0"] != 10 {
 		t.Fatalf("expansions = %+v", state.Files["b.go"].Expansions)
 	}
-	if len(state.CollapsedDirs) != 1 || len(state.SplitFiles) != 1 {
+	if len(state.CollapsedDirs) != 1 || len(state.SplitFiles) != 1 || !state.BlameGutter {
 		t.Fatalf("collapse/split = %+v", state)
 	}
 	if state.ChangeOrder != "path" || state.ChangeClock != 7 || state.ChangeOrdinal["a.go"] != 7 || state.ChangeHashes["a.go"] != "hash" {

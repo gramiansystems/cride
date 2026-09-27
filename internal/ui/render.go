@@ -195,13 +195,13 @@ func CommentControlAt(row Row, column, wrapIndex, width int) CommentControl {
 		checkbox = commentDoneChecked
 	}
 	if checkboxOffset := strings.LastIndex(row.Text, checkbox); checkboxOffset >= 0 {
-		checkboxStart := commentTextColumn + checkboxOffset
+		checkboxStart := blameGutterWidth(row) + commentTextColumn + checkboxOffset
 		if absoluteColumn >= checkboxStart && absoluteColumn < checkboxStart+len(commentDoneOpen) {
 			return CommentControlMarkedAsDone
 		}
 	}
 	if editOffset := strings.Index(row.Text, commentEditLabel); editOffset >= 0 {
-		editStart := commentTextColumn + editOffset
+		editStart := blameGutterWidth(row) + commentTextColumn + editOffset
 		if absoluteColumn >= editStart && absoluteColumn < editStart+len(commentEditLabel) {
 			return CommentControlEdit
 		}
@@ -701,7 +701,7 @@ func renderDiffRows(files []diff.FileDiff, rows []Row, cursor, top, topWrap, wid
 				case RowLine:
 					line = applyMatchSpans(line, rowSpans, wrapOffset+k, width, unifiedRowPrefixWidth(rows[i]), baseBg)
 				case RowPair:
-					line = applyPairMatchSpans(line, rowSpans, wrapOffset+k, width, unifiedRowPrefixWidth(rows[i]), baseBg)
+					line = applyPairMatchSpansWithGutter(line, rowSpans, wrapOffset+k, width, unifiedRowPrefixWidth(rows[i]), baseBg, blameGutterWidth(rows[i]))
 				}
 			}
 			out = append(out, line)
@@ -778,7 +778,8 @@ func rowScreenLines(files []diff.FileDiff, r Row, hl *highlight.Highlighter, row
 // are embedded here; whole-row (cursor/hunk) backgrounds layer on top in
 // diffLines.
 func pairRowLines(files []diff.FileDiff, r Row, hl *highlight.Highlighter, rowIdx, cursor, width int) []string {
-	lw, rw, ok := PairColumnWidths(width)
+	gutterWidth := blameGutterWidth(r)
+	lw, rw, ok := PairColumnWidths(width - gutterWidth)
 	if !ok {
 		return wrapLine(renderRow(files, r, hl, rowIdx, cursor), width)
 	}
@@ -790,6 +791,10 @@ func pairRowLines(files []diff.FileDiff, r Row, hl *highlight.Highlighter, rowId
 	n := max(len(left), len(right))
 	out := make([]string, 0, n)
 	for k := 0; k < n; k++ {
+		gutter := blankBlameGutter(r)
+		if k == 0 {
+			gutter = renderBlameGutter(r)
+		}
 		rel := relativeNumStyle.Render("")
 		if k == 0 {
 			rel = relativeNum(rowIdx, cursor)
@@ -802,7 +807,7 @@ func pairRowLines(files []diff.FileDiff, r Row, hl *highlight.Highlighter, rowId
 		if k < len(right) {
 			rightCell = right[k]
 		}
-		out = append(out, rel+" "+leftCell+divider+rightCell)
+		out = append(out, gutter+rel+" "+leftCell+divider+rightCell)
 	}
 	return out
 }
@@ -860,13 +865,14 @@ func pairCellLines(path string, ln *diff.Line, leftSide bool, hl *highlight.High
 }
 
 func renderRow(files []diff.FileDiff, r Row, hl *highlight.Highlighter, rowIdx, cursor int) string {
+	gutter := renderBlameGutter(r)
 	switch r.Kind {
 	case RowFileHeader:
 		f := files[r.FileIdx]
-		return "    " + statusLetter(f.Status) + " " + fileHeaderStyle.Render(f.Path()) +
+		return gutter + "    " + statusLetter(f.Status) + " " + fileHeaderStyle.Render(f.Path()) +
 			"  " + changeStat(f.Added, f.Deleted)
 	case RowHunkHeader:
-		return "    " + hunkStyle.Render(r.Text)
+		return gutter + "    " + hunkStyle.Render(r.Text)
 	case RowComment:
 		style := commentStyle
 		if r.Muted {
@@ -875,10 +881,10 @@ func renderRow(files []diff.FileDiff, r Row, hl *highlight.Highlighter, rowIdx, 
 		prefix := strings.Repeat(" ", diffRowPrefixWidth-4)
 		if r.CommentHeader && !r.Muted {
 			if controls := strings.Index(r.Text, "  "+commentEditLabel); controls >= 0 {
-				return prefix + style.Render("┃ "+r.Text[:controls]) + dimStyle.Render(r.Text[controls:])
+				return gutter + prefix + style.Render("┃ "+r.Text[:controls]) + dimStyle.Render(r.Text[controls:])
 			}
 		}
-		return prefix + style.Render("┃ "+r.Text)
+		return gutter + prefix + style.Render("┃ "+r.Text)
 	default:
 		f := files[r.FileIdx]
 		ln := r.Line
@@ -889,8 +895,31 @@ func renderRow(files []diff.FileDiff, r Row, hl *highlight.Highlighter, rowIdx, 
 		if r.DiagnosticMarker == "" && r.CommentID != "" {
 			marker = commentStyle.Render("●")
 		}
-		return relativeNum(rowIdx, cursor) + " " + old + " " + nw + " " + marker + " " + sign + " " + content
+		return gutter + relativeNum(rowIdx, cursor) + " " + old + " " + nw + " " + marker + " " + sign + " " + content
 	}
+}
+
+func blameGutterWidth(r Row) int {
+	if r.BlameGutter {
+		return BlameGutterWidth
+	}
+	return 0
+}
+
+func blankBlameGutter(r Row) string {
+	if !r.BlameGutter {
+		return ""
+	}
+	return strings.Repeat(" ", BlameGutterWidth)
+}
+
+func renderBlameGutter(r Row) string {
+	if !r.BlameGutter {
+		return ""
+	}
+	const textWidth = BlameGutterWidth - 2
+	text := truncate.String(r.BlameText, textWidth)
+	return dimStyle.Render(padRight(text, textWidth)) + borderStyle.Render("│") + " "
 }
 
 func diagnosticMarker(marker string) string {
