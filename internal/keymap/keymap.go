@@ -42,6 +42,7 @@ var Groups = []Group{
 		{"ctrl+h / ctrl+l", "Focus the change list / the diff"},
 		{"o", "Toggle file list path/change order"},
 		{"h/l", "Fold/unfold directories when the list has focus"},
+		{"V", "Open the current working-tree file in Vim at the cursor"},
 	}},
 	{"Hunks & unread", []Binding{
 		{"]c/[c", "Move between hunks"},

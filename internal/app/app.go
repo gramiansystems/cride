@@ -87,9 +87,10 @@ const (
 
 // Model holds all UI state. Messages are the only way to mutate it.
 type Model struct {
-	source diffsource.Source
-	hl     *highlight.Highlighter
-	lsp    lsp.Client
+	source        diffsource.Source
+	hl            *highlight.Highlighter
+	lsp           lsp.Client
+	pauseKeyboard func() func()
 
 	files        []diff.FileDiff
 	changedPaths map[string]bool
@@ -364,6 +365,9 @@ type Options struct {
 	Outline outline.Extractor
 	// FreshSession ignores any stored session state (--fresh).
 	FreshSession bool
+	// PauseKeyboardEnhancements returns a function that restores the terminal's
+	// key reporting mode after an external application exits.
+	PauseKeyboardEnhancements func() func()
 }
 
 // New returns the initial model for the given diff source.
@@ -396,6 +400,7 @@ func NewWithOptions(src diffsource.Source, opts Options) Model {
 		source:               src,
 		hl:                   opts.Highlighter,
 		lsp:                  opts.LSP,
+		pauseKeyboard:        opts.PauseKeyboardEnhancements,
 		outlineExtractor:     opts.Outline,
 		freshSession:         opts.FreshSession,
 		changeOrder:          ui.DefaultChangeListOrder,
@@ -1962,6 +1967,12 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.lastShiftPress = time.Time{}
 		return m.handleKey(msg)
 
+	case vimFinishedMsg:
+		if msg.err != nil {
+			return m, tea.Batch(m.reload(false), m.notify(ui.ToastError, "vim: "+msg.err.Error()))
+		}
+		return m, m.reload(false)
+
 	case tea.MouseMsg:
 		m.lastShiftPress = time.Time{}
 		return m.handleMouse(msg)
@@ -2171,6 +2182,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		"?":         commandOpenPalette,
 		"f1":        commandOpenPalette,
 		"ctrl+p":    commandOpenFile,
+		"V":         commandOpenInVim,
 		"/":         commandSearchCurrentFile,
 		"esc":       commandClearSearch,
 		"K":         commandHover,

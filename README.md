@@ -119,6 +119,7 @@ Run `cride --help` for the complete command-line reference.
 | `]c` / `[c` | Next / previous hunk |
 | `}` / `{` | Next / previous file in the file view |
 | `ctrl+a` | Toggle all repository files / diff files only |
+| `V` | Open the current file in Vim at the cursor; return to cride when Vim exits |
 | `c` / `C` | Line comment (or edit selected comment) / general comment |
 | `ctrl+s` / `e` | Save `review.md` without leaving cride |
 | `ctrl+r` | Reload the diff and import edits from `review.md` |

@@ -107,7 +107,7 @@ files:
 		TrueColor: terminalSupportsTrueColor(),
 		Disabled:  os.Getenv("NO_COLOR") != "",
 	})
-	keyboardInput, restoreKeyboard := crideterminal.EnableKeyboardEnhancements(os.Stdin, os.Stdout)
+	keyboardInput, restoreKeyboard, pauseKeyboard := crideterminal.EnableKeyboardEnhancements(os.Stdin, os.Stdout)
 	defer restoreKeyboard()
 
 	programOptions := []tea.ProgramOption{
@@ -118,9 +118,10 @@ files:
 		programOptions = append(programOptions, tea.WithInput(keyboardInput))
 	}
 	p := tea.NewProgram(app.NewWithOptions(src, app.Options{
-		LSP:          lsp.NewProcessClient(src.Root(), lsp.DefaultConfig()),
-		Highlighter:  hl,
-		FreshSession: *fresh,
+		LSP:                       lsp.NewProcessClient(src.Root(), lsp.DefaultConfig()),
+		Highlighter:               hl,
+		FreshSession:              *fresh,
+		PauseKeyboardEnhancements: pauseKeyboard,
 	}), programOptions...)
 	_, runErr := p.Run()
 	restoreKeyboard()

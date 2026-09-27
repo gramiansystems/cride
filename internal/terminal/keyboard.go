@@ -32,23 +32,44 @@ const (
 // Bubble Tea v1, leaving Shift events intact for the app to recognize.
 //
 // Unsupported terminals ignore the control sequence and continue to work
-// through the pass-through reader. The restore function is idempotent.
-func EnableKeyboardEnhancements(input, output *os.File) (io.Reader, func()) {
+// through the pass-through reader. The restore function is idempotent; pause
+// temporarily removes the enhancement while another program owns the terminal.
+func EnableKeyboardEnhancements(input, output *os.File) (io.Reader, func(), func() func()) {
 	if input == nil || output == nil || !term.IsTerminal(input.Fd()) || !term.IsTerminal(output.Fd()) {
-		return nil, func() {}
+		return nil, func() {}, func() func() { return func() {} }
 	}
 	flags := ansi.KittyReportEventTypes | ansi.KittyReportAllKeysAsEscapeCodes | ansi.KittyReportAssociatedKeys
 	if _, err := io.WriteString(output, ansi.PushKittyKeyboard(flags)); err != nil {
-		return nil, func() {}
+		return nil, func() {}, func() func() { return func() {} }
 	}
 
-	var once sync.Once
+	var mu sync.Mutex
+	active, closed := true, false
 	restore := func() {
-		once.Do(func() {
+		mu.Lock()
+		defer mu.Unlock()
+		if active {
 			_, _ = io.WriteString(output, ansi.PopKittyKeyboard(1))
-		})
+		}
+		active, closed = false, true
 	}
-	return &keyboardReader{file: input}, restore
+	pause := func() func() {
+		mu.Lock()
+		if active && !closed {
+			_, _ = io.WriteString(output, ansi.PopKittyKeyboard(1))
+			active = false
+		}
+		mu.Unlock()
+		return func() {
+			mu.Lock()
+			defer mu.Unlock()
+			if !active && !closed {
+				_, _ = io.WriteString(output, ansi.PushKittyKeyboard(flags))
+				active = true
+			}
+		}
+	}
+	return &keyboardReader{file: input}, restore, pause
 }
 
 // keyboardReader retains the terminal file methods so Bubble Tea can still

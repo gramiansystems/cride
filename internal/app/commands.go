@@ -133,6 +133,7 @@ const (
 	commandNextHunk              = "hunks.next"
 	commandNextUnreadOrMatch     = "navigation.next-unread-or-match"
 	commandOpenFile              = "files.open"
+	commandOpenInVim             = "files.open-in-vim"
 	commandOpenListSelection     = "files.open-selection"
 	commandOpenPalette           = "app.command-palette"
 	commandOutlineChanges        = "symbols.changed-outline"
@@ -431,6 +432,9 @@ var commandCatalog = []Command{
 	command(commandOpenFile, "Search everywhere", "shift shift / ctrl+p", "Find project files and symbols with fuzzy matching.", reviewOnly(func(c CommandContext) tea.Cmd {
 		return c.Model.openNavigateOverlay()
 	})),
+	command(commandOpenInVim, "Open current file in Vim", "V", "Edit the current working-tree file in Vim at the cursor line and column.", reviewOnly(func(c CommandContext) tea.Cmd {
+		return c.Model.openCurrentFileInVim()
+	})),
 	command(commandOpenListSelection, "Open selected change-list item", "enter", "Open the selected file or toggle the selected directory.", reviewOnly(func(c CommandContext) tea.Cmd {
 		return c.Model.openSelectedChangeListItem()
 	})),
@@ -617,6 +621,7 @@ func commandPaletteCategory(id string) CommandCategory {
 		commandNextFile,
 		commandNextUnreadOrMatch,
 		commandOpenFile,
+		commandOpenInVim,
 		commandOpenListSelection,
 		commandPreviousFile,
 		commandPreviousUnreadOrMatch,

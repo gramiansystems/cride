@@ -29,6 +29,7 @@ Press `?` (or `F1`, `g?`) inside cride for the categorized, executable command p
 | `ctrl+h / ctrl+l` | Focus the change list / the diff |
 | `o` | Toggle file list path/change order |
 | `h/l` | Fold/unfold directories when the list has focus |
+| `V` | Open the current working-tree file in Vim at the cursor |
 
 ## Hunks & unread
 
