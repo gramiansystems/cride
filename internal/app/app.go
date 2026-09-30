@@ -3598,13 +3598,11 @@ func (m *Model) positionCursorAtLocation(loc source.Location) bool {
 }
 
 func (m *Model) positionCursorAtLocationSide(loc source.Location, side navsearch.ResultSide) bool {
-	if loc.Path != m.currentFilePath() {
-		if side != navsearch.ResultSideBaseline {
-			return false
-		}
-		if m.selectedFile < 0 || m.selectedFile >= len(m.files) {
-			return false
-		}
+	if m.selectedFile < 0 || m.selectedFile >= len(m.files) {
+		return false
+	}
+	if loc.Path != m.currentFilePath() && side != navsearch.ResultSideBaseline {
+		return false
 	}
 	rows := m.currentRows()
 	lastLineRow := -1
@@ -3618,31 +3616,36 @@ func (m *Model) positionCursorAtLocationSide(loc source.Location, side navsearch
 			lastLineRow = i
 			if rowLoc.Line >= loc.Line {
 				m.cursor = i
+				m.splitActiveLeft = true
 				m.alignCursorColToLocation(row, loc, true, rowLoc.Line == loc.Line)
 				return true
 			}
 		}
 		if lastLineRow >= 0 {
 			m.cursor = lastLineRow
+			m.splitActiveLeft = true
 			m.setCursorCol(0)
 			return true
 		}
 		return false
 	}
+	file := m.files[m.selectedFile]
 	for i, row := range rows {
-		rowLine := sourceLine(row)
-		if rowLine == 0 {
+		rowLoc, ok := currentLocationForRow(file, row)
+		if !ok || rowLoc.Path != loc.Path {
 			continue
 		}
 		lastLineRow = i
-		if rowLine >= loc.Line {
+		if rowLoc.Line >= loc.Line {
 			m.cursor = i
-			m.alignCursorColToLocation(row, loc, false, rowLine == loc.Line)
+			m.splitActiveLeft = false
+			m.alignCursorColToLocation(row, loc, false, rowLoc.Line == loc.Line)
 			return true
 		}
 	}
 	if lastLineRow >= 0 {
 		m.cursor = lastLineRow
+		m.splitActiveLeft = false
 		m.setCursorCol(0)
 		return true
 	}

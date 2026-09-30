@@ -989,6 +989,97 @@ func TestSearchResultJumpLoadsFullFileAndPositionsCursor(t *testing.T) {
 	}
 }
 
+func TestResultJumpUsesResultSideLineNumber(t *testing.T) {
+	t.Parallel()
+
+	files := []diff.FileDiff{{
+		OldPath: "a.go",
+		NewPath: "a.go",
+		Status:  diff.FileModified,
+		Hunks: []diff.Hunk{{
+			Header:   "@@ -3,2 +3,1 @@",
+			OldStart: 3,
+			OldLines: 2,
+			NewStart: 3,
+			NewLines: 1,
+			Lines: []diff.Line{
+				{Kind: diff.LineDelete, Content: "red Target()", OldLine: 3},
+				{Kind: diff.LineContext, Content: "green Target()", OldLine: 4, NewLine: 3},
+			},
+		}},
+	}}
+
+	for _, tc := range []struct {
+		name      string
+		reference bool
+		split     bool
+		side      navsearch.ResultSide
+		column    int
+		wantMode  ViewMode
+		wantText  string
+		wantLine  int
+	}{
+		{"search green current line", false, false, navsearch.ResultSideCurrent, 7, ViewFile, "green Target()", 3},
+		{"search red deleted line", false, false, navsearch.ResultSideBaseline, 5, ViewDiff, "red Target()", 3},
+		{"search red shifted line", false, false, navsearch.ResultSideBaseline, 7, ViewDiff, "green Target()", 4},
+		{"reference green current line", true, false, navsearch.ResultSideCurrent, 7, ViewFile, "green Target()", 3},
+		{"reference red deleted line", true, false, navsearch.ResultSideBaseline, 5, ViewDiff, "red Target()", 3},
+		{"reference red shifted split line", true, true, navsearch.ResultSideBaseline, 7, ViewDiff, "green Target()", 4},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := Model{
+				files:        files,
+				selectedFile: 0,
+				width:        100,
+				height:       24,
+				fileContents: map[string]fileContentState{
+					"a.go": {lines: []string{"one", "two", "green Target()"}, loaded: true},
+				},
+			}
+			if tc.split {
+				m.splitFiles = map[string]bool{"a.go": true}
+			}
+			loc := source.Location{Path: "a.go", Line: tc.wantLine, Column: tc.column}
+			var got Model
+			var cmd tea.Cmd
+			if tc.reference {
+				m.referencePanel = referencePanelState{
+					Open:    true,
+					Results: []navsearch.ReferenceResult{{Location: loc, Side: tc.side}},
+				}
+				cmd = m.acceptReferenceResult()
+				got = m
+			} else {
+				m.overlay = overlayState{
+					Kind: OverlaySearch,
+					Results: []navsearch.Result{{
+						Kind: navsearch.ResultText, Location: loc, Side: tc.side,
+					}},
+				}
+				next, jumpCmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+				got, cmd = next.(Model), jumpCmd
+			}
+			if cmd != nil {
+				t.Fatal("jumping to loaded result returned unexpected command")
+			}
+			if got.viewMode != tc.wantMode {
+				t.Fatalf("viewMode = %v, want %v", got.viewMode, tc.wantMode)
+			}
+			row := got.currentRows()[got.cursor]
+			content, ok := rowContentForSide(row, tc.side == navsearch.ResultSideBaseline)
+			if !ok || content != tc.wantText || rowLineNumberForSide(row, tc.side == navsearch.ResultSideBaseline) != tc.wantLine {
+				t.Fatalf("cursor row = %+v, want %q on line %d", row, tc.wantText, tc.wantLine)
+			}
+			if tc.split && !got.splitActiveLeft {
+				t.Fatal("baseline jump did not activate the left side")
+			}
+			if got.col != tc.column-1 {
+				t.Fatalf("cursor column = %d, want %d", got.col, tc.column-1)
+			}
+		})
+	}
+}
+
 func TestSearchResultJumpReanchorsNextViewToggle(t *testing.T) {
 	t.Parallel()
 
