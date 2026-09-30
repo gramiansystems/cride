@@ -5,6 +5,7 @@ package app
 // See DESIGN.md's "Rendering and interaction" section.
 
 import (
+	"sort"
 	"strconv"
 	"strings"
 	"unicode"
@@ -212,18 +213,26 @@ func (m Model) searchMatchCount() string {
 	return strconv.Itoa(m.search.current+1) + "/" + strconv.Itoa(len(m.search.matches))
 }
 
-// uiMatchSpans converts matches to render spans for the current file.
-func (m Model) uiMatchSpans() []ui.MatchSpan {
-	if !m.search.active || len(m.search.matches) == 0 {
+// uiMatchSpans converts only matches in the renderer's half-open row range.
+// computeMatches emits matches in row order, so finding the visible window
+// takes logarithmic time and allocation depends on visible matches alone.
+func (s searchViewState) uiMatchSpans(firstRow, endRow int) []ui.MatchSpan {
+	if !s.active || len(s.matches) == 0 || endRow <= firstRow {
 		return nil
 	}
-	spans := make([]ui.MatchSpan, 0, len(m.search.matches))
-	for i, match := range m.search.matches {
+	first := sort.Search(len(s.matches), func(i int) bool { return s.matches[i].rowIdx >= firstRow })
+	end := first + sort.Search(len(s.matches)-first, func(i int) bool { return s.matches[first+i].rowIdx >= endRow })
+	if first == end {
+		return nil
+	}
+	spans := make([]ui.MatchSpan, 0, end-first)
+	for i := first; i < end; i++ {
+		match := s.matches[i]
 		spans = append(spans, ui.MatchSpan{
 			RowIdx:  match.rowIdx,
 			Start:   match.startCol,
 			End:     match.endCol,
-			Current: i == m.search.current,
+			Current: i == s.current,
 			Side:    match.side,
 		})
 	}

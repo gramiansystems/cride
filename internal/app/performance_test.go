@@ -62,6 +62,14 @@ func BenchmarkSwitchLargeFiles(b *testing.B) {
 }
 
 func BenchmarkScrollAndViewHighlighted(b *testing.B) {
+	benchmarkScrollAndView(b, false)
+}
+
+func BenchmarkScrollAndViewWithSearch(b *testing.B) {
+	benchmarkScrollAndView(b, true)
+}
+
+func benchmarkScrollAndView(b *testing.B, search bool) {
 	m := Model{
 		source: fakeSource{},
 		files:  benchmarkFiles(1, 20_000),
@@ -71,10 +79,21 @@ func BenchmarkScrollAndViewHighlighted(b *testing.B) {
 	}
 	m.updateChangeOrder(m.files)
 	m.clampScroll()
+	if search {
+		m.search = searchViewState{active: true, query: "value"}
+		m.refreshSearchMatches(false)
+	}
+	maxTop := m.currentLayout().TotalLines() - m.viewHeight()
+	direction := 3
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		m.windowScroll(3)
+		if top := m.topScreenLine(m.currentLayout()); top >= maxTop {
+			direction = -3
+		} else if top == 0 {
+			direction = 3
+		}
+		m.windowScroll(direction)
 		m.clampScroll()
 		_ = m.View()
 	}
@@ -165,7 +184,6 @@ func TestRenderRowsCachesDiagnosticsAndInvalidatesUpdates(t *testing.T) {
 		diagnostics:        map[string][]lsp.Diagnostic{path: {warning}},
 		diagnosticsVersion: 1,
 	}
-	_ = m.currentRows() // establish the shared cache used by value-render copies
 	first := m.renderRows()
 	again := m.renderRows()
 	if &first[0] != &again[0] {

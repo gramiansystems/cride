@@ -1,12 +1,47 @@
 package app
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
 	"cride/internal/diff"
 	"cride/internal/ui"
 )
+
+func TestVisibleSearchSpansPreserveMatchIdentity(t *testing.T) {
+	t.Parallel()
+	search := searchViewState{
+		active: true, current: 2,
+		matches: []matchSpan{
+			{rowIdx: 0, startCol: 0, endCol: 2},
+			{rowIdx: 2, startCol: 1, endCol: 3, side: ui.MatchSideLeft},
+			{rowIdx: 2, startCol: 4, endCol: 6, side: ui.MatchSideRight},
+			{rowIdx: 4, startCol: 0, endCol: 2, side: ui.MatchSideBoth},
+			{rowIdx: 8, startCol: 0, endCol: 2},
+		},
+	}
+	want := []ui.MatchSpan{
+		{RowIdx: 2, Start: 1, End: 3, Side: ui.MatchSideLeft},
+		{RowIdx: 2, Start: 4, End: 6, Side: ui.MatchSideRight, Current: true},
+		{RowIdx: 4, Start: 0, End: 2, Side: ui.MatchSideBoth},
+	}
+	if got := search.uiMatchSpans(2, 5); !reflect.DeepEqual(got, want) {
+		t.Fatalf("visible spans = %+v, want %+v", got, want)
+	}
+	if got := search.uiMatchSpans(4, 8); len(got) != 1 || got[0].Current {
+		t.Fatalf("off-screen current match changed visible match identity: %+v", got)
+	}
+	for _, bounds := range [][2]int{{3, 4}, {9, 20}, {2, 2}, {4, 2}} {
+		if got := search.uiMatchSpans(bounds[0], bounds[1]); got != nil {
+			t.Fatalf("empty range %v returned %+v", bounds, got)
+		}
+	}
+	search.active = false
+	if got := search.uiMatchSpans(0, 10); got != nil {
+		t.Fatal("inactive search produced spans")
+	}
+}
 
 func searchTestFile(path string) diff.FileDiff {
 	return diff.FileDiff{

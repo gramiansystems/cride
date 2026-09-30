@@ -59,7 +59,6 @@ var (
 	footerStyle       lipgloss.Style
 	selectedFileStyle lipgloss.Style
 	normalFileStyle   lipgloss.Style
-	cursorStyle       lipgloss.Style
 	hunkBgStyle       lipgloss.Style
 	addedBgStyle      lipgloss.Style
 	removedBgStyle    lipgloss.Style
@@ -132,6 +131,12 @@ type RenderOptions struct {
 	Footer *Footer
 	// Matches are in-file search spans to highlight over the diff rows.
 	Matches []MatchSpan
+	// MatchSource is queried once per frame for the half-open range of rows
+	// actually drawn. Large match sets can be indexed without copying spans
+	// for the entire file. Its spans precede Matches in overlay order.
+	MatchSource func(firstRow, endRow int) []MatchSpan
+	// Renderer optionally reuses visible row rendering between frames.
+	Renderer *Renderer
 	// ChangeList overrides the default (unfocused, fully expanded) list view.
 	ChangeList *ChangeListView
 	// ChangeListWidth is the requested outer width of the change-list pane.
@@ -364,7 +369,7 @@ func RenderWithOptions(files []diff.FileDiff, rows []Row, selectedFile, cursor, 
 	}
 	listFocused := listView.Focused
 	left := boxWithBorder(leftOuterWidth, contentHeight, changeListLines(*listView, files, leftOuterWidth-2), paneBorderStyle(listFocused))
-	center := boxWithBorder(rightOuterWidth, contentHeight, diffPanelLines(files, rows, selectedFile, cursor, top, options.TopWrap, rightOuterWidth-2, contentHeight, hl, fullFile, options.Matches, !isCommitComparison(baseline), options.Breadcrumb, options.ShowBreadcrumb), paneBorderStyle(!listFocused))
+	center := boxWithBorder(rightOuterWidth, contentHeight, diffPanelLines(files, rows, selectedFile, cursor, top, rightOuterWidth-2, contentHeight, hl, fullFile, !isCommitComparison(baseline), options), paneBorderStyle(!listFocused))
 	bodyParts := []string{left, center}
 	if panel != nil && panel.Open && panel.Placement == PanelRight && layout.ResultPanelWidth > 0 {
 		content := max(1, layout.ResultPanelHeight-2)
@@ -551,7 +556,7 @@ func bottomPanelResultLine(result BottomPanelResult, width int) string {
 	return resultLine(result.Label, result.Preview, width, result.Tone, 0, result.ChangeField)
 }
 
-func diffPanelLines(files []diff.FileDiff, rows []Row, selectedFile, cursor, top, topWrap, width, height int, hl *highlight.Highlighter, fullFile bool, matches []MatchSpan, live bool, breadcrumb string, showBreadcrumb bool) []string {
+func diffPanelLines(files []diff.FileDiff, rows []Row, selectedFile, cursor, top, width, height int, hl *highlight.Highlighter, fullFile bool, live bool, options RenderOptions) []string {
 	if height <= 0 {
 		return nil
 	}
@@ -564,15 +569,15 @@ func diffPanelLines(files []diff.FileDiff, rows []Row, selectedFile, cursor, top
 	}
 	lines := []string{dimStyle.Render(truncate.String(path, uint(max(1, width))))}
 	diffHeaderHeight := diffPathHeight
-	if showBreadcrumb {
+	if options.ShowBreadcrumb {
 		diffHeaderHeight++
 		crumb := " "
-		if breadcrumb != "" {
-			crumb = "  " + breadcrumb
+		if options.Breadcrumb != "" {
+			crumb = "  " + options.Breadcrumb
 		}
 		lines = append(lines, hunkStyle.Render(truncate.String(crumb, uint(max(1, width)))))
 	}
-	lines = append(lines, diffLinesWithMatches(files, rows, cursor, top, topWrap, width, max(0, height-diffHeaderHeight), hl, matches, live)...)
+	lines = append(lines, diffLinesWithOptions(files, rows, cursor, top, options.TopWrap, width, max(0, height-diffHeaderHeight), hl, live, options)...)
 	return lines
 }
 
@@ -597,6 +602,8 @@ func boxWithBorder(width, contentHeight int, lines []string, border lipgloss.Sty
 	}
 	inner := width - 2
 	var b strings.Builder
+	b.Grow(width * (contentHeight + 2))
+	side := border.Render("│")
 	b.WriteString(border.Render("╭" + strings.Repeat("─", inner) + "╮"))
 	b.WriteByte('\n')
 	for i := 0; i < contentHeight; i++ {
@@ -604,9 +611,9 @@ func boxWithBorder(width, contentHeight int, lines []string, border lipgloss.Sty
 		if i < len(lines) {
 			line = lines[i]
 		}
-		b.WriteString(border.Render("│"))
+		b.WriteString(side)
 		b.WriteString(padRight(line, inner))
-		b.WriteString(border.Render("│"))
+		b.WriteString(side)
 		b.WriteByte('\n')
 	}
 	b.WriteString(border.Render("╰" + strings.Repeat("─", inner) + "╯"))
@@ -614,10 +621,14 @@ func boxWithBorder(width, contentHeight int, lines []string, border lipgloss.Sty
 }
 
 func diffLines(files []diff.FileDiff, rows []Row, cursor, top, topWrap, width, height int, hl *highlight.Highlighter) []string {
-	return diffLinesWithMatches(files, rows, cursor, top, topWrap, width, height, hl, nil, true)
+	return diffLinesWithOptions(files, rows, cursor, top, topWrap, width, height, hl, true, RenderOptions{})
 }
 
-func diffLinesWithMatches(files []diff.FileDiff, rows []Row, cursor, top, topWrap, width, height int, hl *highlight.Highlighter, matches []MatchSpan, live bool) []string {
+func diffLinesWithOptions(files []diff.FileDiff, rows []Row, cursor, top, topWrap, width, height int, hl *highlight.Highlighter, live bool, options RenderOptions) []string {
+	if height <= 0 || len(rows) == 0 {
+		options.Renderer.begin(rows, width, hl)
+		options.Renderer.finish(0, 0)
+	}
 	if height <= 0 {
 		return nil
 	}
@@ -627,8 +638,7 @@ func diffLinesWithMatches(files []diff.FileDiff, rows []Row, cursor, top, topWra
 		}
 		return []string{dimStyle.Render("No file selected.")}
 	}
-	matchesByRow := matchSpansByRow(matches)
-	return renderDiffRows(files, rows, cursor, top, topWrap, width, height, hl, matchesByRow)
+	return renderDiffRows(files, rows, cursor, top, topWrap, width, height, hl, options)
 }
 
 // emptyReviewLines fills the diff pane when the review has no changes. For a
@@ -659,49 +669,56 @@ func emptyReviewLines(live bool, width int) []string {
 	return out
 }
 
-func renderDiffRows(files []diff.FileDiff, rows []Row, cursor, top, topWrap, width, height int, hl *highlight.Highlighter, matchesByRow map[int][]MatchSpan) []string {
-	out := make([]string, 0, height)
+func renderDiffRows(files []diff.FileDiff, rows []Row, cursor, top, topWrap, width, height int, hl *highlight.Highlighter, options RenderOptions) []string {
+	type visibleRow struct {
+		index, offset, count int
+		rendered             *renderedRow
+	}
+	visible := make([]visibleRow, 0, min(height, len(rows)))
+	options.Renderer.begin(rows, width, hl)
 	hunkStart, hunkEnd, hasActiveHunk := activeHunkRange(rows, cursor)
-	for i := top; i < len(rows) && len(out) < height; i++ {
-		selected := i == cursor
+	used, end := 0, top
+	for i := top; i < len(rows) && used < height; i++ {
 		activeHunk := hasActiveHunk && i >= hunkStart && i <= hunkEnd
-		isPair := rows[i].Kind == RowPair
-		wrapped := rowScreenLines(files, rows[i], hl, i, cursor, width)
+		bg := rowBackground(rows[i], i == cursor, activeHunk)
+		rendered := options.Renderer.row(files, rows[i], hl, i, cursor, width, bg)
 		wrapOffset := 0
 		if i == top && topWrap > 0 {
-			wrapOffset = min(topWrap, len(wrapped)-1)
-			wrapped = wrapped[wrapOffset:]
+			wrapOffset = min(topWrap, len(rendered.styled)-1)
 		}
+		count := min(height-used, len(rendered.styled)-wrapOffset)
+		visible = append(visible, visibleRow{index: i, offset: wrapOffset, count: count, rendered: rendered})
+		used += count
+		end = i + 1
+	}
+	options.Renderer.finish(top, end)
+	// Ask for spans only after wrapping has established the exact row range,
+	// including partially visible rows at either edge of the viewport.
+	var matchesByRow map[int][]MatchSpan
+	if options.MatchSource != nil && end > top {
+		matchesByRow = matchSpansByRow(options.MatchSource(top, end))
+	}
+	if len(options.Matches) > 0 && matchesByRow == nil {
+		matchesByRow = make(map[int][]MatchSpan)
+	}
+	for _, span := range options.Matches {
+		if span.RowIdx >= top && span.RowIdx < end {
+			matchesByRow[span.RowIdx] = append(matchesByRow[span.RowIdx], span)
+		}
+	}
+	out := make([]string, 0, used)
+	for _, item := range visible {
+		i := item.index
 		rowSpans := matchesByRow[i]
-		for k, line := range wrapped {
-			if len(out) >= height {
-				break
-			}
-			line = padRight(line, width)
-			var baseBg lipgloss.Color
-			if selected {
-				baseBg = colorCursor
-				line = withPersistentBackground(line, colorCursor)
-				line = cursorStyle.Width(width).MaxWidth(width).Render(line)
-			} else if bg, ok := changeBgColor(rows[i]); ok {
-				baseBg = bg
-				line = withPersistentBackground(line, bg)
-				line = changeBgStyle(rows[i]).Width(width).MaxWidth(width).Render(line)
-			} else if activeHunk && !(isPair && PairRowHasChange(rows[i])) {
-				// Pair rows embed per-column change tints; only tint pure
-				// context pairs with the active-hunk background.
-				baseBg = colorHunkBg
-				line = withPersistentBackground(line, colorHunkBg)
-				line = hunkBgStyle.Width(width).MaxWidth(width).Render(line)
-			} else if !isPair {
-				line = changeBgStyle(rows[i]).Width(width).MaxWidth(width).Render(line)
-			}
+		for k := item.offset; k < item.offset+item.count; k++ {
+			line := item.rendered.line(k, i, cursor)
+			baseBg := item.rendered.bg
 			if len(rowSpans) > 0 {
 				switch rows[i].Kind {
 				case RowLine:
-					line = applyMatchSpans(line, rowSpans, wrapOffset+k, width, unifiedRowPrefixWidth(rows[i]), baseBg)
+					line = applyMatchSpans(line, rowSpans, k, width, unifiedRowPrefixWidth(rows[i]), baseBg)
 				case RowPair:
-					line = applyPairMatchSpansWithGutter(line, rowSpans, wrapOffset+k, width, unifiedRowPrefixWidth(rows[i]), baseBg, blameGutterWidth(rows[i]))
+					line = applyPairMatchSpansWithGutter(line, rowSpans, k, width, unifiedRowPrefixWidth(rows[i]), baseBg, blameGutterWidth(rows[i]))
 				}
 			}
 			out = append(out, line)
@@ -737,7 +754,8 @@ func activeHunkRange(rows []Row, cursor int) (start, end int, ok bool) {
 // Side-by-side geometry: relative number, then two columns each with a
 // 7-cell gutter (line number, space, sign, space), split by a 1-cell divider.
 const (
-	pairRelWidth      = 4 // relativeNum(3) + space
+	relativeNumWidth  = 3
+	pairRelWidth      = relativeNumWidth + 1
 	pairColPrefix     = 7 // num(4) + space + sign + space
 	pairDividerWidth  = 1
 	pairMinCellWidth  = 8
@@ -940,9 +958,10 @@ func diagnosticMarker(marker string) string {
 }
 
 func relativeNum(rowIdx, cursor int) string {
-	if rowIdx == cursor {
-		return relativeNumStyle.Render("0")
-	}
+	return relativeNumStyle.Render(relativeNumberText(rowIdx, cursor))
+}
+
+func relativeNumberText(rowIdx, cursor int) string {
 	dist := rowIdx - cursor
 	if dist < 0 {
 		dist = -dist
@@ -950,21 +969,8 @@ func relativeNum(rowIdx, cursor int) string {
 	if dist > 999 {
 		dist = 999
 	}
-	return relativeNumStyle.Render(strconv.Itoa(dist))
-}
-
-func changeBgStyle(r Row) lipgloss.Style {
-	if color, ok := changeBgColor(r); ok {
-		switch color {
-		case colorAddBg:
-			return addedBgStyle
-		case colorDelBg:
-			return removedBgStyle
-		default:
-			return lipgloss.NewStyle().Background(color)
-		}
-	}
-	return lipgloss.NewStyle()
+	text := strconv.Itoa(dist)
+	return strings.Repeat(" ", relativeNumWidth-len(text)) + text
 }
 
 func changeBgColor(r Row) (lipgloss.Color, bool) {
@@ -1167,8 +1173,11 @@ func wrapLine(s string, width int) []string {
 // it is already wider.
 func padRight(s string, w int) string {
 	vis := lipgloss.Width(s)
-	if vis >= w {
+	if vis > w {
 		return truncate.String(s, uint(w))
+	}
+	if vis == w {
+		return s
 	}
 	return s + strings.Repeat(" ", w-vis)
 }

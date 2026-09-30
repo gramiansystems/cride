@@ -41,6 +41,7 @@ type rowCacheKey struct {
 }
 
 type rowCacheState struct {
+	renderer          ui.Renderer
 	entries           map[rowCacheKey][]ui.Row
 	order             []rowCacheKey
 	diagnosticEntries map[diagnosticRowCacheKey][]ui.Row

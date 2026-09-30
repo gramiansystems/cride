@@ -2703,17 +2703,19 @@ func (m Model) View() string {
 	case m.loading:
 		return m.spinnerFrameString() + " loading diff…"
 	}
+	rows := m.renderRows()
 	listView := m.changeListView()
 	// Symbol choice highlights candidates in-line via match spans; it renders
 	// no popup even though it captures keys like an overlay. The character
 	// cursor goes last so its cell stays visible on top of match styling.
-	matches := append(m.uiMatchSpans(), m.symbolChoiceSpans()...)
-	matches = append(matches, m.cursorSpan()...)
-	out := ui.RenderWithOptions(m.files, m.renderRows(), m.selectedFile, m.cursor, m.top, m.width, m.height, m.hl, m.source.Baseline(), m.viewMode == ViewFile, m.bottomPanelView(), ui.RenderOptions{
+	matches := append(m.symbolChoiceSpans(), m.cursorSpan()...)
+	out := ui.RenderWithOptions(m.files, rows, m.selectedFile, m.cursor, m.top, m.width, m.height, m.hl, m.source.Baseline(), m.viewMode == ViewFile, m.bottomPanelView(), ui.RenderOptions{
 		LSPStatus:       m.semanticStatusLine(),
 		TopWrap:         m.topWrap,
 		Footer:          m.footerView(),
 		Matches:         matches,
+		MatchSource:     m.search.uiMatchSpans,
+		Renderer:        &m.rows.renderer,
 		ChangeList:      &listView,
 		ChangeListWidth: m.changeListWidth,
 		Composer:        m.composerView(),
@@ -5265,7 +5267,7 @@ func (m Model) changedFilePaths() []string {
 	return paths
 }
 
-func (m Model) renderRows() []ui.Row {
+func (m *Model) renderRows() []ui.Row {
 	rows := m.currentRows()
 	if len(rows) == 0 || m.selectedFile < 0 || m.selectedFile >= len(m.files) {
 		return rows

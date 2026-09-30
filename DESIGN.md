@@ -144,6 +144,14 @@ Wrapping maintains a screen-line-to-logical-row mapping. Scroll calculations
 therefore operate on visible terminal lines while selection and comments stay
 attached to source rows.
 
+`ui.Renderer` retains rendered content for the current viewport. It owns
+invalidation for row data, pane width, highlighting, and theme; relative line
+numbers and search/cursor overlays are applied separately. The app supplies a
+search-span function that the renderer queries once with the exact visible row
+range, including partially wrapped rows. Match lookup uses the search's row
+ordering, so scrolling work depends on visible matches rather than the total
+number of matches in the file.
+
 The change list, main review pane, bottom enrichment panel, command palette,
 and search overlays are projections of the same model. Search Everywhere
 combines immediate fuzzy filename results with debounced workspace-symbol
